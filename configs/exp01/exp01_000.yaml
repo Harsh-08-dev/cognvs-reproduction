@@ -1,0 +1,18 @@
+experiment_id: EXP01
+run_id: EXP01_FT000
+
+input_sequence: seq01
+
+checkpoint: baseline
+
+fine_tuning_steps: 0
+
+resolution:
+  width: null
+  height: null
+
+seed: 42
+
+output_dir: results/EXP01/FT000
+
+notes: "Baseline without test-time fine-tuning"

@@ -1,0 +1,18 @@
+experiment_id: EXP01
+run_id: EXP01_FT100
+
+input_sequence: seq01
+
+checkpoint: baseline
+
+fine_tuning_steps: 100
+
+resolution:
+  width: null
+  height: null
+
+seed: 42
+
+output_dir: results/EXP01/FT100
+
+notes: "100-step fine-tuning condition"
