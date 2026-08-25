@@ -76,3 +76,20 @@ results/EXP01/FT100
 ### notes
 
 Optional description of the run.
+
+## Validation
+
+Configuration files are validated before an experiment is run.
+
+The validator currently checks:
+
+- Required fields
+- Fine-tuning step type
+- Non-negative fine-tuning steps
+- Seed type
+- Non-empty experiment ID
+- Non-empty run ID
+- Non-empty output directory
+
+Resolution values remain unset until the execution environment
+and dataset configuration are confirmed.
