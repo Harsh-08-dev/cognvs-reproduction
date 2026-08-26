@@ -18,6 +18,7 @@ from src.experiments.metadata import (
     init_runtime_placeholder,
 )
 from src.inference.run_cognvs import find_codebase_path, run_inference
+from src.evaluation.video_utils import extract_frames
 
 
 class ExperimentRunner:
@@ -63,9 +64,10 @@ class ExperimentRunner:
         instead of duplicating it here.
 
         By the time execute() is called, prepare() has already created:
-          - self.frames_dir  : *.png frame extraction lands here in a later
-                                pipeline step (see issue #3) — not written by
-                                this method
+          - self.frames_dir  : empty dir created by prepare(); this method
+                                extracts self.video_path into *.png frames
+                                here once the video is copied, so evaluate.py
+                                --gen_dir has no manual step to run first
           - self.video_path  : where this method copies the generated video
           - self.output_dir/config.yaml   : copy of self.config
           - self.runtime_path              : runtime.json placeholder,
@@ -99,8 +101,10 @@ class ExperimentRunner:
 
         if dry_run:
             print(f"[ExperimentRunner] DRY RUN — would copy {output_video} -> {self.video_path}")
+            print(f"[ExperimentRunner] DRY RUN — would extract {self.video_path} -> {self.frames_dir}")
         else:
             shutil.copy(str(output_video), str(self.video_path))
+            extract_frames(str(self.video_path), str(self.frames_dir))
 
         runtime = {
             "status": "complete",

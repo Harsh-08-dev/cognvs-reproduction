@@ -25,6 +25,8 @@ import sys
 import time
 from pathlib import Path
 
+from src.evaluation.video_utils import extract_frames
+
 
 def find_codebase_path(explicit_path: str = None) -> Path:
     """
@@ -114,16 +116,23 @@ def collect_outputs(codebase_path: Path, repo_root: Path, sequence: str, angle: 
     """
     Copies the generated output video + metadata into this repo's standardized
     results/ folder, per the team's agreed output format:
-        results/EXP01/<sequence>/angle_<NNN>/output.mp4, config.yaml, runtime.json, log.txt
+        results/EXP01/<sequence>/angle_<NNN>/output.mp4, frames/*.png, config.yaml, runtime.json, log.txt
+
+    Also extracts output.mp4 into frames/ so the folder is immediately usable
+    as evaluate.py's --gen_dir, without a manual video_utils.py step in between.
     """
     src_output = codebase_path / "demo_data" / sequence / "outputs" / "eval_render1_out.mp4"
     dest_dir = repo_root / "results" / "EXP01" / sequence / f"angle_{angle:03d}"
     dest_dir.mkdir(parents=True, exist_ok=True)
+    frames_dir = dest_dir / "frames"
 
     if dry_run:
         print(f"[run_cognvs] DRY RUN — would copy {src_output} -> {dest_dir / 'output.mp4'}")
+        print(f"[run_cognvs] DRY RUN — would extract frames from {dest_dir / 'output.mp4'} -> {frames_dir}")
+        frames_dir.mkdir(parents=True, exist_ok=True)
     else:
         shutil.copy(str(src_output), str(dest_dir / "output.mp4"))
+        extract_frames(str(dest_dir / "output.mp4"), str(frames_dir))
 
     config = {
         "experiment_id": "EXP01",

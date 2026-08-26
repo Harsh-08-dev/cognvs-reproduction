@@ -1,7 +1,14 @@
 # Evaluation Protocol
 
 ## Inputs required from P1
-- Generated novel-view video (or frame sequence) — `output.mp4` or `frames/*.png`
+- Generated novel-view video (or frame sequence) — `output.mp4` or `frames/*.png`.
+  As of the inference/evaluation integration fix, `frames/*.png` is produced
+  automatically: both `run_cognvs.py`'s `collect_outputs()` and
+  `ExperimentRunner.execute()` call `src/evaluation/video_utils.py`'s
+  `extract_frames()` on the generated `output.mp4` right after it's written,
+  so `evaluate.py --gen_dir <run_dir>/frames` works with no manual
+  intermediate step. `video_utils.py` is still runnable standalone for ad-hoc
+  video → frames conversion (e.g. re-extracting an existing `output.mp4`).
 - Ground-truth novel-view video/frames for the SAME target camera path (if using
   a synthetic dataset like Kubric-4D/ParallelDomain-4D this exists by construction;
   if using a real captured video with no GT novel view, we CANNOT compute
