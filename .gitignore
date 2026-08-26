@@ -1,29 +1,34 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
+
+# Virtual environments
 .venv/
 venv/
+env/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Large files
+# Large video files
 *.mp4
 *.avi
 *.mov
-*.pth
+
+# Large model files
 *.pt
+*.pth
 *.ckpt
 *.safetensors
 *.npy
 
 # Data
-data/raw/
-data/processed/
+data/
+datasets/
 
-# Results
-results/*
-!results/.gitkeep
+# Generated outputs
+results/
 
 # Logs
 logs/
@@ -35,8 +40,15 @@ logs/
 
 # OS
 .DS_Store
+Thumbs.db
 
-# safety net: sibling folder holding CMU's cog-nvs codebase
-# shouldn't be needed since it lives outside this repo (in R1/cognvs-codebase),
-# but kept as a backup in case it's ever copied in by mistake
+# Temporary files
+tmp/
+temp/
+
+# Generated analysis outputs
+analysis/*.csv
+analysis/plots/
+
+# Safety net: sibling folder holding CMU's CogNVS codebase
 cognvs-codebase/
