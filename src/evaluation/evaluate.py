@@ -1,12 +1,11 @@
 """
 src/evaluation/evaluate.py
 
-Usage:
-    python src/evaluation/evaluate.py \
-        --gen_dir results/raw_outputs/EXP01_100/generated \
-        --gt_dir results/raw_outputs/EXP01_100/gt \
-        --out results/metrics/EXP01_100.json \
-        --tag EXP01_100
+Usage (normal, paired ground truth exists):
+    python evaluate.py --gen_dir <gen_frames> --gt_dir <gt_frames> --out <out.json> --tag <tag>
+
+Usage (no ground truth exists, e.g. in-the-wild angle sweep beyond captured views):
+    python evaluate.py --gen_dir <gen_frames> --no_gt --reference_dir <source_frames> --out <out.json> --tag <tag>
 """
 import argparse
 import json
@@ -32,44 +31,69 @@ def load_frames(frame_dir):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gen_dir", required=True, help="Folder of generated frames")
-    parser.add_argument("--gt_dir", required=True, help="Folder of ground-truth frames")
+    parser.add_argument("--gt_dir", required=False, default=None, help="Folder of ground-truth frames (omit if --no_gt)")
+    parser.add_argument("--no_gt", action="store_true", help="Skip PSNR/SSIM/LPIPS — use when no paired GT exists (e.g. in-the-wild angle sweep)")
+    parser.add_argument("--reference_dir", required=False, default=None, help="Folder of real reference frames for FID/KID when no paired GT exists (e.g. original source frames)")
     parser.add_argument("--out", required=True, help="Output metrics.json path")
     parser.add_argument("--tag", required=True, help="Name of this experiment/sequence")
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
     gen_frames, gen_files = load_frames(args.gen_dir)
-    gt_frames, gt_files = load_frames(args.gt_dir)
 
-    assert len(gen_frames) == len(gt_frames), \
-        f"Frame count mismatch: {len(gen_frames)} generated vs {len(gt_frames)} GT. Check with P1."
+    results = {"tag": args.tag, "num_frames": len(gen_frames)}
 
-    psnr_vals, ssim_vals, lpips_vals = [], [], []
+    if args.no_gt:
+        # No paired ground truth exists (in-the-wild sequences at novel angles).
+        # FID/KID need a reference distribution — use reference_dir if given,
+        # otherwise skip FID/KID too and only rely on qualitative comparison.
+        results["psnr"] = None
+        results["ssim"] = None
+        results["lpips"] = None
 
-    for gen, gt in zip(gen_frames, gt_frames):
-        if gen.shape != gt.shape:
-            gen = cv2.resize(gen, (gt.shape[1], gt.shape[0]))
-        psnr_vals.append(compute_psnr(gen, gt))
-        ssim_vals.append(compute_ssim(gen, gt))
-        lpips_vals.append(compute_lpips(gen, gt, device=args.device))
+        if args.reference_dir:
+            ref_frames, _ = load_frames(args.reference_dir)
+            results["fid"] = compute_fid(gen_frames, ref_frames, device=args.device)
+            try:
+                kid_mean, kid_std = compute_kid(gen_frames, ref_frames, device=args.device)
+            except ValueError as e:
+                print(f"[WARN] Skipping KID: {e}")
+                kid_mean, kid_std = None, None
+            results["kid_mean"] = kid_mean
+            results["kid_std"] = kid_std
+        else:
+            print("[INFO] No --reference_dir given, skipping FID/KID. Only qualitative comparison available.")
+            results["fid"] = None
+            results["kid_mean"] = None
+            results["kid_std"] = None
 
-    fid_val = compute_fid(gen_frames, gt_frames, device=args.device)
-    try:
-        kid_mean, kid_std = compute_kid(gen_frames, gt_frames, device=args.device)
-    except ValueError as e:
-        print(f"[WARN] Skipping KID: {e}")
-        kid_mean, kid_std = None, None
+    else:
+        if not args.gt_dir:
+            raise ValueError("--gt_dir is required unless --no_gt is set.")
 
-    results = {
-        "tag": args.tag,
-        "num_frames": len(gen_frames),
-        "psnr": float(np.mean(psnr_vals)),
-        "ssim": float(np.mean(ssim_vals)),
-        "lpips": float(np.mean(lpips_vals)),
-        "fid": fid_val,
-        "kid_mean": kid_mean,
-        "kid_std": kid_std,
-    }
+        gt_frames, gt_files = load_frames(args.gt_dir)
+        assert len(gen_frames) == len(gt_frames), \
+            f"Frame count mismatch: {len(gen_frames)} generated vs {len(gt_frames)} GT. Check with P1."
+
+        psnr_vals, ssim_vals, lpips_vals = [], [], []
+        for gen, gt in zip(gen_frames, gt_frames):
+            if gen.shape != gt.shape:
+                gen = cv2.resize(gen, (gt.shape[1], gt.shape[0]))
+            psnr_vals.append(compute_psnr(gen, gt))
+            ssim_vals.append(compute_ssim(gen, gt))
+            lpips_vals.append(compute_lpips(gen, gt, device=args.device))
+
+        results["psnr"] = float(np.mean(psnr_vals))
+        results["ssim"] = float(np.mean(ssim_vals))
+        results["lpips"] = float(np.mean(lpips_vals))
+        results["fid"] = compute_fid(gen_frames, gt_frames, device=args.device)
+        try:
+            kid_mean, kid_std = compute_kid(gen_frames, gt_frames, device=args.device)
+        except ValueError as e:
+            print(f"[WARN] Skipping KID: {e}")
+            kid_mean, kid_std = None, None
+        results["kid_mean"] = kid_mean
+        results["kid_std"] = kid_std
 
     out_dir = os.path.dirname(args.out)
     if out_dir:

@@ -21,3 +21,16 @@
 PSNR/SSIM/LPIPS are PAIRED metrics — generated frame N must correspond exactly
 to GT frame N (same camera pose, same timestep). Confirm with P1 that frame
 indices line up 1:1 before computing anything.
+
+## No-GT mode (in-the-wild sequences, novel angles beyond captured views)
+For sequences like davis_bear/sora_balloon at 15°/30°/60°/90°, no ground truth
+exists at the novel angle — these are single-camera in-the-wild videos, and the
+alternate angle was never physically captured. This matches the paper's own
+Fig. 10, which is qualitative-only for the same reason.
+
+For these runs:
+- `psnr`, `ssim`, `lpips` will be `null` in the output JSON (no paired GT to compare).
+- `fid`/`kid_mean`/`kid_std` are computed against `--reference_dir` (the original
+  source video frames) as the "real" reference distribution.
+- Visual/qualitative comparison via `comparison.py` becomes the primary evidence
+  for this experiment, alongside FID/KID trends across angles.
