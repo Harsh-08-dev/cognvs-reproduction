@@ -1,11 +1,13 @@
 """
 src/evaluation/evaluate.py
 
-Usage (normal, paired ground truth exists):
-    python evaluate.py --gen_dir <gen_frames> --gt_dir <gt_frames> --out <out.json> --tag <tag>
+Usage (run from repo root, like every other script in this repo):
 
-Usage (no ground truth exists, e.g. in-the-wild angle sweep beyond captured views):
-    python evaluate.py --gen_dir <gen_frames> --no_gt --reference_dir <source_frames> --out <out.json> --tag <tag>
+Normal, paired ground truth exists:
+    python -m src.evaluation.evaluate --gen_dir <gen_frames> --gt_dir <gt_frames> --out <out.json> --tag <tag>
+
+No ground truth exists (in-the-wild angle sweep beyond captured views):
+    python -m src.evaluation.evaluate --gen_dir <gen_frames> --no_gt --reference_dir <source_frames> --out <out.json> --tag <tag>
 """
 import argparse
 import json
@@ -13,8 +15,8 @@ import os
 import cv2
 import numpy as np
 
-from metrics import compute_psnr, compute_ssim, compute_lpips
-from fid_kid import compute_fid, compute_kid
+from src.evaluation.metrics import compute_psnr, compute_ssim, compute_lpips
+from src.evaluation.fid_kid import compute_fid, compute_kid
 
 
 def load_frames(frame_dir):

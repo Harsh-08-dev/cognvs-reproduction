@@ -9,11 +9,11 @@ Given a sequence name and a target angle, this script:
   5. Runs demo.py (neural inpainting / zero-shot inference stage)
   6. Copies outputs into a standardized results/ folder in THIS repo
 
-Usage:
-    python src/inference/run_cognvs.py --sequence davis_bear --angle 30
+Usage (run from repo root, like every other script in this repo):
+    python -m src.inference.run_cognvs --sequence davis_bear --angle 30
 
 Dry run (no GPU needed, just verifies file logic):
-    python src/inference/run_cognvs.py --sequence davis_bear --angle 30 --dry_run
+    python -m src.inference.run_cognvs --sequence davis_bear --angle 30 --dry_run
 """
 
 import argparse

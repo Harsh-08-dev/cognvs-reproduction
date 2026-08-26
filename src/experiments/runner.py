@@ -1,3 +1,16 @@
+"""
+src/experiments/runner.py
+
+Runs a full EXP01 (zero-shot angle-sweep) experiment from a YAML config:
+config -> inference (src/inference/run_cognvs.py) -> standardized output
+layout (frames/, output.mp4, metadata.json, config.yaml, runtime.json).
+
+Usage (run from repo root, like every other script in this repo):
+    python -m src.experiments.runner --config configs/exp01_davis_bear_angle030.yaml
+
+Dry run (no GPU needed, just verifies config/output-layout logic):
+    python -m src.experiments.runner --config configs/exp01_davis_bear_angle030.yaml --dry_run
+"""
 import argparse
 import json
 import shutil

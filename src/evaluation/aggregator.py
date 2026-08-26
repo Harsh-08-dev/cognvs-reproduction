@@ -4,8 +4,8 @@ src/evaluation/aggregator.py
 Combines multiple metrics.json files (e.g. one per finetuning-step checkpoint)
 into a single results/final_metrics.csv
 
-Usage:
-    python src/evaluation/aggregator.py --metrics_dir results/metrics --out results/final_metrics.csv
+Usage (run from repo root, like every other script in this repo):
+    python -m src.evaluation.aggregator --metrics_dir results/metrics --out results/final_metrics.csv
 """
 import argparse
 import json

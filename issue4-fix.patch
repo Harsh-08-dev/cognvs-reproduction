@@ -1,0 +1,301 @@
+diff --git a/docs/p2_analysis_workflow.md b/docs/p2_analysis_workflow.md
+index a29b24b..52ec45d 100644
+--- a/docs/p2_analysis_workflow.md
++++ b/docs/p2_analysis_workflow.md
+@@ -7,6 +7,25 @@ organization, and baseline-relative experiment analysis.
+ 
+ P3 owns metric computation, raw metric aggregation, and visualization.
+ 
++## Invocation convention
++
++Every script under `src/` is run as a module, from the repo root:
++
++```
++python -m src.<package>.<module> [args]
++```
++
++e.g. `python -m src.experiments.runner --config <path>`,
++`python -m src.evaluation.evaluate --gen_dir <dir> --no_gt --out <path> --tag <tag>`,
++`python -m src.visualization.plots --csv <path> --out_dir <dir> --x_col angle`.
++
++This is the one invocation style that's guaranteed to resolve every script's
++imports correctly (`evaluate.py`'s `metrics`/`fid_kid` imports previously only
++worked if run from inside `src/evaluation/`, which broke as soon as it was
++invoked the same way as every other script — see the fix history). Top-level
++utility scripts in `scripts/` (not part of the `src` package) are still run
++directly, e.g. `python scripts/check_environment.py`.
++
+ ---
+ 
+ ## EXP01 Conditions
+diff --git a/src/evaluation/add_angle.py b/src/evaluation/add_angle.py
+index dbd7895..0708044 100644
+--- a/src/evaluation/add_angle.py
++++ b/src/evaluation/add_angle.py
+@@ -4,8 +4,8 @@ src/evaluation/add_angle.py
+ Adds an 'angle' field to each metrics.json based on filename pattern ANGLE<degrees>.json
+ e.g. ANGLE015.json -> angle=15, ANGLE030.json -> angle=30, ANGLE090.json -> angle=90
+ 
+-Usage:
+-    python add_angle.py --metrics_dir ../../results/metrics
++Usage (run from repo root, like every other script in this repo):
++    python -m src.evaluation.add_angle --metrics_dir results/metrics
+ """
+ import argparse
+ import json
+diff --git a/src/evaluation/add_steps.py b/src/evaluation/add_steps.py
+index 286c3d3..1520203 100644
+--- a/src/evaluation/add_steps.py
++++ b/src/evaluation/add_steps.py
+@@ -4,8 +4,8 @@ src/evaluation/add_steps.py
+ Adds a 'steps' field to each metrics.json based on filename pattern FT<steps>.json
+ e.g. FT000.json -> steps=0, FT050.json -> steps=50, FT100.json -> steps=100, FT200.json -> steps=200
+ 
+-Usage:
+-    python add_steps.py --metrics_dir ../../results/metrics
++Usage (run from repo root, like every other script in this repo):
++    python -m src.evaluation.add_steps --metrics_dir results/metrics
+ """
+ import argparse
+ import json
+diff --git a/src/evaluation/aggregator.py b/src/evaluation/aggregator.py
+index f816926..6d8b50c 100644
+--- a/src/evaluation/aggregator.py
++++ b/src/evaluation/aggregator.py
+@@ -4,8 +4,8 @@ src/evaluation/aggregator.py
+ Combines multiple metrics.json files (e.g. one per finetuning-step checkpoint)
+ into a single results/final_metrics.csv
+ 
+-Usage:
+-    python src/evaluation/aggregator.py --metrics_dir results/metrics --out results/final_metrics.csv
++Usage (run from repo root, like every other script in this repo):
++    python -m src.evaluation.aggregator --metrics_dir results/metrics --out results/final_metrics.csv
+ """
+ import argparse
+ import json
+diff --git a/src/evaluation/evaluate.py b/src/evaluation/evaluate.py
+index 0663646..028106d 100644
+--- a/src/evaluation/evaluate.py
++++ b/src/evaluation/evaluate.py
+@@ -1,11 +1,13 @@
+ """
+ src/evaluation/evaluate.py
+ 
+-Usage (normal, paired ground truth exists):
+-    python evaluate.py --gen_dir <gen_frames> --gt_dir <gt_frames> --out <out.json> --tag <tag>
++Usage (run from repo root, like every other script in this repo):
+ 
+-Usage (no ground truth exists, e.g. in-the-wild angle sweep beyond captured views):
+-    python evaluate.py --gen_dir <gen_frames> --no_gt --reference_dir <source_frames> --out <out.json> --tag <tag>
++Normal, paired ground truth exists:
++    python -m src.evaluation.evaluate --gen_dir <gen_frames> --gt_dir <gt_frames> --out <out.json> --tag <tag>
++
++No ground truth exists (in-the-wild angle sweep beyond captured views):
++    python -m src.evaluation.evaluate --gen_dir <gen_frames> --no_gt --reference_dir <source_frames> --out <out.json> --tag <tag>
+ """
+ import argparse
+ import json
+@@ -13,8 +15,8 @@ import os
+ import cv2
+ import numpy as np
+ 
+-from metrics import compute_psnr, compute_ssim, compute_lpips
+-from fid_kid import compute_fid, compute_kid
++from src.evaluation.metrics import compute_psnr, compute_ssim, compute_lpips
++from src.evaluation.fid_kid import compute_fid, compute_kid
+ 
+ 
+ def load_frames(frame_dir):
+diff --git a/src/evaluation/video_utils.py b/src/evaluation/video_utils.py
+index bfee7f8..d792361 100644
+--- a/src/evaluation/video_utils.py
++++ b/src/evaluation/video_utils.py
+@@ -4,8 +4,8 @@ src/evaluation/video_utils.py
+ Utility to extract frames from a video file into a folder of images,
+ so evaluate.py (which works on frame folders) can be used on .mp4 outputs.
+ 
+-Usage:
+-    python video_utils.py --video path/to/output.mp4 --out_dir path/to/frames
++Usage (run from repo root, like every other script in this repo):
++    python -m src.evaluation.video_utils --video path/to/output.mp4 --out_dir path/to/frames
+ """
+ import argparse
+ import os
+diff --git a/src/experiments/runner.py b/src/experiments/runner.py
+index 0426af1..2afee15 100644
+--- a/src/experiments/runner.py
++++ b/src/experiments/runner.py
+@@ -1,3 +1,16 @@
++"""
++src/experiments/runner.py
++
++Runs a full EXP01 (zero-shot angle-sweep) experiment from a YAML config:
++config -> inference (src/inference/run_cognvs.py) -> standardized output
++layout (frames/, output.mp4, metadata.json, config.yaml, runtime.json).
++
++Usage (run from repo root, like every other script in this repo):
++    python -m src.experiments.runner --config configs/exp01_davis_bear_angle030.yaml
++
++Dry run (no GPU needed, just verifies config/output-layout logic):
++    python -m src.experiments.runner --config configs/exp01_davis_bear_angle030.yaml --dry_run
++"""
+ import argparse
+ import json
+ import shutil
+diff --git a/src/inference/run_cognvs.py b/src/inference/run_cognvs.py
+index 60f4e26..6368a69 100644
+--- a/src/inference/run_cognvs.py
++++ b/src/inference/run_cognvs.py
+@@ -9,11 +9,11 @@ Given a sequence name and a target angle, this script:
+   5. Runs demo.py (neural inpainting / zero-shot inference stage)
+   6. Copies outputs into a standardized results/ folder in THIS repo
+ 
+-Usage:
+-    python src/inference/run_cognvs.py --sequence davis_bear --angle 30
++Usage (run from repo root, like every other script in this repo):
++    python -m src.inference.run_cognvs --sequence davis_bear --angle 30
+ 
+ Dry run (no GPU needed, just verifies file logic):
+-    python src/inference/run_cognvs.py --sequence davis_bear --angle 30 --dry_run
++    python -m src.inference.run_cognvs --sequence davis_bear --angle 30 --dry_run
+ """
+ 
+ import argparse
+diff --git a/src/visualization/comparison.py b/src/visualization/comparison.py
+index abee687..e89e798 100644
+--- a/src/visualization/comparison.py
++++ b/src/visualization/comparison.py
+@@ -3,8 +3,8 @@ src/visualization/comparison.py
+ 
+ Creates GT | Generated | Diff comparison images, matching the paper's Fig. 4/11/12 style.
+ 
+-Usage:
+-    python src/visualization/comparison.py \
++Usage (run from repo root, like every other script in this repo):
++    python -m src.visualization.comparison \
+         --gen_dir results/raw_outputs/EXP01_100/generated \
+         --gt_dir results/raw_outputs/EXP01_100/gt \
+         --out_dir results/comparisons/EXP01_100
+diff --git a/src/visualization/plots.py b/src/visualization/plots.py
+index cc41ff9..1d719e0 100644
+--- a/src/visualization/plots.py
++++ b/src/visualization/plots.py
+@@ -5,8 +5,8 @@ Generates metric-vs-independent-variable plots.
+ Works for both finetuning-step sweeps AND angle sweeps — just point --x_col
+ at whichever column your CSV uses ("steps" or "angle").
+ 
+-Usage:
+-    python plots.py --csv results/final_metrics.csv --out_dir results/plots --x_col angle --x_label "Camera deviation (degrees)"
++Usage (run from repo root, like every other script in this repo):
++    python -m src.visualization.plots --csv results/final_metrics.csv --out_dir results/plots --x_col angle --x_label "Camera deviation (degrees)"
+ """
+ import argparse
+ import os
+diff --git a/tests/test_evaluate_imports.py b/tests/test_evaluate_imports.py
+new file mode 100644
+index 0000000..38f2042
+--- /dev/null
++++ b/tests/test_evaluate_imports.py
+@@ -0,0 +1,102 @@
++"""
++Covers issue #4: evaluate.py did `from metrics import ...` / `from fid_kid
++import ...`, which only resolves when run from inside src/evaluation/ (e.g.
++`python evaluate.py ...`). Every other script in the repo is documented and
++invoked repo-root-relative (`python -m src.<package>.<module> ...`), so this
++broke the standard invocation. Fixed by switching to absolute,
++package-relative imports (`from src.evaluation.metrics import ...`).
++
++metrics.py / fid_kid.py pull in torch/lpips/skimage/torchmetrics, which
++aren't declared in requirements.txt yet (that's issue #5, not this one). We
++stub those heavy modules in sys.modules so these tests verify the import
++*path* is correct, independent of whether those ML libs happen to be
++installed on a given machine.
++"""
++import importlib
++import json
++import sys
++import types
++from unittest.mock import MagicMock
++
++import cv2
++import numpy as np
++
++
++def _stub_heavy_deps(monkeypatch):
++    """Lightweight stand-ins so metrics.py/fid_kid.py import cleanly without
++    torch/lpips/skimage/torchmetrics actually installed."""
++    torch_mod = MagicMock()
++    torch_mod.no_grad.return_value.__enter__ = MagicMock()
++    torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
++    monkeypatch.setitem(sys.modules, "torch", torch_mod)
++    monkeypatch.setitem(sys.modules, "lpips", MagicMock())
++
++    skimage_mod = types.ModuleType("skimage")
++    skimage_metrics_mod = MagicMock()
++    monkeypatch.setitem(sys.modules, "skimage", skimage_mod)
++    monkeypatch.setitem(sys.modules, "skimage.metrics", skimage_metrics_mod)
++
++    torchmetrics_mod = types.ModuleType("torchmetrics")
++    torchmetrics_image_mod = types.ModuleType("torchmetrics.image")
++    monkeypatch.setitem(sys.modules, "torchmetrics", torchmetrics_mod)
++    monkeypatch.setitem(sys.modules, "torchmetrics.image", torchmetrics_image_mod)
++    monkeypatch.setitem(sys.modules, "torchmetrics.image.fid", MagicMock())
++    monkeypatch.setitem(sys.modules, "torchmetrics.image.kid", MagicMock())
++
++
++def _fresh_import(module_name):
++    """(Re-)import a module, discarding any previously cached (possibly
++    broken) entry in sys.modules."""
++    sys.modules.pop(module_name, None)
++    return importlib.import_module(module_name)
++
++
++def test_evaluate_imports_metrics_and_fid_kid_as_package_relative(monkeypatch):
++    """The actual bug: bare `from metrics import ...` / `from fid_kid import
++    ...` don't resolve unless cwd/sys.path is src/evaluation/. This must
++    import cleanly the same way every other module in the repo does — via
++    its package path, with the repo root on sys.path."""
++    _stub_heavy_deps(monkeypatch)
++    for name in ("src.evaluation.metrics", "src.evaluation.fid_kid", "src.evaluation.evaluate"):
++        sys.modules.pop(name, None)
++
++    evaluate = _fresh_import("src.evaluation.evaluate")
++
++    assert hasattr(evaluate, "main")
++    assert hasattr(evaluate, "load_frames")
++    # confirm it actually pulled in the real functions, not stubs of its own
++    assert evaluate.compute_psnr is not None
++    assert evaluate.compute_fid is not None
++
++
++def test_evaluate_cli_runs_end_to_end_no_gt(tmp_path, monkeypatch):
++    """Exercises the fixed import + argparse + load_frames + json-write path
++    via the real main() entry point, in --no_gt / no --reference_dir mode
++    (which never calls into metrics.py's/fid_kid.py's compute_* functions,
++    so this only needs cv2/numpy — already required by evaluate.py itself)."""
++    _stub_heavy_deps(monkeypatch)
++    for name in ("src.evaluation.metrics", "src.evaluation.fid_kid", "src.evaluation.evaluate"):
++        sys.modules.pop(name, None)
++    evaluate = _fresh_import("src.evaluation.evaluate")
++
++    gen_dir = tmp_path / "gen_frames"
++    gen_dir.mkdir()
++    for i in range(3):
++        cv2.imwrite(str(gen_dir / f"{i:04d}.png"), np.zeros((8, 8, 3), dtype=np.uint8))
++
++    out_path = tmp_path / "metrics.json"
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--no_gt",
++        "--out", str(out_path),
++        "--tag", "ANGLE030",
++    ])
++
++    evaluate.main()
++
++    results = json.loads(out_path.read_text())
++    assert results["tag"] == "ANGLE030"
++    assert results["num_frames"] == 3
++    assert results["psnr"] is None
++    assert results["fid"] is None

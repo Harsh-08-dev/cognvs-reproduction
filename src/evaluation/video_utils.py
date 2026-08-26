@@ -4,8 +4,8 @@ src/evaluation/video_utils.py
 Utility to extract frames from a video file into a folder of images,
 so evaluate.py (which works on frame folders) can be used on .mp4 outputs.
 
-Usage:
-    python video_utils.py --video path/to/output.mp4 --out_dir path/to/frames
+Usage (run from repo root, like every other script in this repo):
+    python -m src.evaluation.video_utils --video path/to/output.mp4 --out_dir path/to/frames
 """
 import argparse
 import os

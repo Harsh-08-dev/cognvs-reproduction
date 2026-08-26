@@ -7,6 +7,25 @@ organization, and baseline-relative experiment analysis.
 
 P3 owns metric computation, raw metric aggregation, and visualization.
 
+## Invocation convention
+
+Every script under `src/` is run as a module, from the repo root:
+
+```
+python -m src.<package>.<module> [args]
+```
+
+e.g. `python -m src.experiments.runner --config <path>`,
+`python -m src.evaluation.evaluate --gen_dir <dir> --no_gt --out <path> --tag <tag>`,
+`python -m src.visualization.plots --csv <path> --out_dir <dir> --x_col angle`.
+
+This is the one invocation style that's guaranteed to resolve every script's
+imports correctly (`evaluate.py`'s `metrics`/`fid_kid` imports previously only
+worked if run from inside `src/evaluation/`, which broke as soon as it was
+invoked the same way as every other script — see the fix history). Top-level
+utility scripts in `scripts/` (not part of the `src` package) are still run
+directly, e.g. `python scripts/check_environment.py`.
+
 ---
 
 ## EXP01 Conditions

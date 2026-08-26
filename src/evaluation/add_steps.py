@@ -4,8 +4,8 @@ src/evaluation/add_steps.py
 Adds a 'steps' field to each metrics.json based on filename pattern FT<steps>.json
 e.g. FT000.json -> steps=0, FT050.json -> steps=50, FT100.json -> steps=100, FT200.json -> steps=200
 
-Usage:
-    python add_steps.py --metrics_dir ../../results/metrics
+Usage (run from repo root, like every other script in this repo):
+    python -m src.evaluation.add_steps --metrics_dir results/metrics
 """
 import argparse
 import json

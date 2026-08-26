@@ -4,8 +4,8 @@ src/evaluation/add_angle.py
 Adds an 'angle' field to each metrics.json based on filename pattern ANGLE<degrees>.json
 e.g. ANGLE015.json -> angle=15, ANGLE030.json -> angle=30, ANGLE090.json -> angle=90
 
-Usage:
-    python add_angle.py --metrics_dir ../../results/metrics
+Usage (run from repo root, like every other script in this repo):
+    python -m src.evaluation.add_angle --metrics_dir results/metrics
 """
 import argparse
 import json

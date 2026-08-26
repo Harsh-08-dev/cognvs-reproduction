@@ -5,8 +5,8 @@ Generates metric-vs-independent-variable plots.
 Works for both finetuning-step sweeps AND angle sweeps — just point --x_col
 at whichever column your CSV uses ("steps" or "angle").
 
-Usage:
-    python plots.py --csv results/final_metrics.csv --out_dir results/plots --x_col angle --x_label "Camera deviation (degrees)"
+Usage (run from repo root, like every other script in this repo):
+    python -m src.visualization.plots --csv results/final_metrics.csv --out_dir results/plots --x_col angle --x_label "Camera deviation (degrees)"
 """
 import argparse
 import os

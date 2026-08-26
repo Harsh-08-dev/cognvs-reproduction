@@ -3,8 +3,8 @@ src/visualization/comparison.py
 
 Creates GT | Generated | Diff comparison images, matching the paper's Fig. 4/11/12 style.
 
-Usage:
-    python src/visualization/comparison.py \
+Usage (run from repo root, like every other script in this repo):
+    python -m src.visualization.comparison \
         --gen_dir results/raw_outputs/EXP01_100/generated \
         --gt_dir results/raw_outputs/EXP01_100/gt \
         --out_dir results/comparisons/EXP01_100
