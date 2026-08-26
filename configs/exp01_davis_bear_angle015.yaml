@@ -1,0 +1,9 @@
+experiment_id: EXP01
+run_id: EXP01_davis_bear_angle015
+input_sequence: davis_bear
+angle_deg: 15
+checkpoint: cognvs_ckpt_inpaint
+fine_tuning_steps: 0
+resolution: 480p
+seed: 0
+output_dir: results/EXP01/davis_bear/angle_015
