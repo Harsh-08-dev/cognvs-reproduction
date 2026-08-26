@@ -33,8 +33,7 @@ data/
 datasets/
 
 # Generated outputs
-results/videos/
-results/outputs/
+results/
 
 # Temporary files
 tmp/
