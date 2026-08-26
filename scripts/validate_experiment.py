@@ -1,6 +1,5 @@
 import argparse
 from pathlib import Path
-from flask import config
 import yaml
 
 

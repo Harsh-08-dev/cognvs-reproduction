@@ -1,0 +1,8 @@
+# Dependencies for P2's experiment-orchestration tooling only
+# (configs/runner/validator/analyzer under scripts/ and src/experiments/).
+#
+# This is separate from CogNVS's own heavy ML dependencies (torch, etc.),
+# which P1 installs into the cognvs-codebase environment per
+# cognvs-reproduction/docs/setup.md.
+pyyaml
+pytest
