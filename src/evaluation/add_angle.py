@@ -17,15 +17,27 @@ import re
 def extract_angle_from_tag(tag: str) -> int:
     """
     Extracts the numeric angle from a tag like 'ANGLE015', 'ANGLE030', 'ANGLE090'.
-    Falls back to any trailing digits if the ANGLE prefix isn't present.
+
+    Deliberately strict: earlier versions fell back to grabbing any trailing
+    digits from the tag, which silently mislabeled fine-tuning-steps tags
+    (e.g. 'FT030' -> angle=30) instead of failing. Add fine-tuning-steps
+    metrics with add_steps.py, not this script.
     """
-    match = re.search(r'ANGLE(\d+)', tag, re.IGNORECASE)
+    match = re.search(r'^ANGLE(\d+)$', tag, re.IGNORECASE)
     if match:
         return int(match.group(1))
-    match = re.search(r'(\d+)$', tag)
-    if match:
-        return int(match.group(1))
-    raise ValueError(f"Could not extract angle from tag: {tag}")
+
+    if re.search(r'FT\d+', tag, re.IGNORECASE):
+        raise ValueError(
+            f"Tag '{tag}' looks like a fine-tuning-steps tag (FT### format), "
+            f"not angle-sweep data (ANGLE###). Use add_steps.py for "
+            f"fine-tuning-ablation metrics.json files instead."
+        )
+
+    raise ValueError(
+        f"Could not extract angle from tag: {tag!r}. Expected ANGLE### "
+        f"format (e.g. 'ANGLE015', 'ANGLE030')."
+    )
 
 
 def main():

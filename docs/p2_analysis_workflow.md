@@ -46,8 +46,28 @@ ground truth at the novel angle:
 
 Because there is no GT, EXP01 evaluation is FID/KID-vs-reference plus
 qualitative comparison — see `docs/analysis/evaluation_protocol.md`'s
-"No-GT mode" section, and use `add_angle.py` (not `add_steps.py`) /
-`analyze_baseline_exp01.py`'s angle-aware counterpart for aggregation.
+"No-GT mode" section. The angle-sweep analysis path is:
+
+```
+aggregator.py + add_angle.py -> final_metrics.csv (has an 'angle' column)
+    ├── plots.py --x_col angle          -> metric-vs-angle trend plots
+    └── scripts/analyze_angle_baseline_exp01.py
+                                         -> FID/KID relative to the
+                                            smallest angle actually run
+                                            (no FT000-equivalent baseline
+                                            exists for this experiment)
+```
+
+Use `add_angle.py`, not `add_steps.py`, to tag EXP01 metrics — both now
+reject being pointed at the other experiment's tag format instead of
+silently mislabeling data (e.g. `add_steps.py` used to read `ANGLE030` as
+`steps=30` via a generic trailing-digit fallback; that fallback is gone).
+`analyze_baseline_exp01.py` similarly refuses angle-sweep CSVs (missing
+`steps`/`FT000`) with a message pointing at
+`scripts/analyze_angle_baseline_exp01.py` instead of failing on a
+confusing missing-column error. PSNR/SSIM/LPIPS are never compared for
+EXP01 (they're `null` in every row, no GT to pair against) — only
+FID/KID.
 
 ### EXP02 (fine-tuning-steps ablation) — not yet implemented
 
@@ -61,7 +81,7 @@ renamed **EXP02** and is out of scope for now (it also needs test-time
 fine-tuning, which requires ≥5 GPUs per `docs/setup.md` — unavailable in
 this environment). If EXP02 is implemented later, it keeps the FT### tag
 format and `analyze_baseline_exp01.py`'s FT000-baseline logic, which was
-built for it and should not be pointed at EXP01 angle-sweep data (see
+built for it and refuses to run against EXP01 angle-sweep data (see
 `docs/analysis/evaluation_protocol.md`).
 
 | Run | Fine-tuning steps | Role |

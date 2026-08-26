@@ -1,0 +1,604 @@
+diff --git a/docs/analysis/evaluation_protocol.md b/docs/analysis/evaluation_protocol.md
+index 2ff5ab4..b8c44e0 100644
+--- a/docs/analysis/evaluation_protocol.md
++++ b/docs/analysis/evaluation_protocol.md
+@@ -40,4 +40,10 @@ For these runs:
+ - `fid`/`kid_mean`/`kid_std` are computed against `--reference_dir` (the original
+   source video frames) as the "real" reference distribution.
+ - Visual/qualitative comparison via `comparison.py` becomes the primary evidence
+-  for this experiment, alongside FID/KID trends across angles.
+\ No newline at end of file
++  for this experiment, alongside FID/KID trends across angles.
++- Baseline-relative comparison uses `scripts/analyze_angle_baseline_exp01.py`,
++  which compares each angle's FID/KID to the smallest angle actually run
++  (there's no zero-angle/FT000-equivalent condition to use instead). Don't
++  point `scripts/analyze_baseline_exp01.py` (the FT000-baseline script) at
++  this data — it's for the FT###-based fine-tuning-steps ablation and will
++  refuse to run against angle-sweep CSVs.
+\ No newline at end of file
+diff --git a/docs/p2_analysis_workflow.md b/docs/p2_analysis_workflow.md
+index 52ec45d..d189370 100644
+--- a/docs/p2_analysis_workflow.md
++++ b/docs/p2_analysis_workflow.md
+@@ -46,8 +46,28 @@ ground truth at the novel angle:
+ 
+ Because there is no GT, EXP01 evaluation is FID/KID-vs-reference plus
+ qualitative comparison — see `docs/analysis/evaluation_protocol.md`'s
+-"No-GT mode" section, and use `add_angle.py` (not `add_steps.py`) /
+-`analyze_baseline_exp01.py`'s angle-aware counterpart for aggregation.
++"No-GT mode" section. The angle-sweep analysis path is:
++
++```
++aggregator.py + add_angle.py -> final_metrics.csv (has an 'angle' column)
++    ├── plots.py --x_col angle          -> metric-vs-angle trend plots
++    └── scripts/analyze_angle_baseline_exp01.py
++                                         -> FID/KID relative to the
++                                            smallest angle actually run
++                                            (no FT000-equivalent baseline
++                                            exists for this experiment)
++```
++
++Use `add_angle.py`, not `add_steps.py`, to tag EXP01 metrics — both now
++reject being pointed at the other experiment's tag format instead of
++silently mislabeling data (e.g. `add_steps.py` used to read `ANGLE030` as
++`steps=30` via a generic trailing-digit fallback; that fallback is gone).
++`analyze_baseline_exp01.py` similarly refuses angle-sweep CSVs (missing
++`steps`/`FT000`) with a message pointing at
++`scripts/analyze_angle_baseline_exp01.py` instead of failing on a
++confusing missing-column error. PSNR/SSIM/LPIPS are never compared for
++EXP01 (they're `null` in every row, no GT to pair against) — only
++FID/KID.
+ 
+ ### EXP02 (fine-tuning-steps ablation) — not yet implemented
+ 
+@@ -61,7 +81,7 @@ renamed **EXP02** and is out of scope for now (it also needs test-time
+ fine-tuning, which requires ≥5 GPUs per `docs/setup.md` — unavailable in
+ this environment). If EXP02 is implemented later, it keeps the FT### tag
+ format and `analyze_baseline_exp01.py`'s FT000-baseline logic, which was
+-built for it and should not be pointed at EXP01 angle-sweep data (see
++built for it and refuses to run against EXP01 angle-sweep data (see
+ `docs/analysis/evaluation_protocol.md`).
+ 
+ | Run | Fine-tuning steps | Role |
+diff --git a/scripts/analyze_angle_baseline_exp01.py b/scripts/analyze_angle_baseline_exp01.py
+new file mode 100644
+index 0000000..31c2910
+--- /dev/null
++++ b/scripts/analyze_angle_baseline_exp01.py
+@@ -0,0 +1,300 @@
++"""
++scripts/analyze_angle_baseline_exp01.py
++
++Angle-aware counterpart to analyze_baseline_exp01.py, for EXP01's zero-shot
++angle-sweep data (ANGLE015/030/060/090 tags, no paired ground truth).
++
++The angle sweep has no FT000-equivalent baseline condition — there's no
++"zero deviation" fine-tuned run to compare against — and no PSNR/SSIM/LPIPS,
++since those require paired ground truth, which doesn't exist for in-the-wild
++sequences at novel angles beyond the captured view (see
++docs/analysis/evaluation_protocol.md's "No-GT mode" section; this matches
++the paper's own Fig. 10, which is qualitative-only for the same reason). So
++this script differs from analyze_baseline_exp01.py in two ways:
++  - the baseline is the smallest-angle row actually run (closest to the
++    source view), not a fixed "FT000" tag
++  - only FID (relative %) and KID mean (absolute delta) are compared, since
++    those are the only metrics EXP01 computes without GT; a metric missing
++    for a row (e.g. KID skipped when <2 frames were available) is reported
++    as null rather than raising
++
++Usage (run from repo root):
++    python -m scripts.analyze_angle_baseline_exp01 --csv results/final_metrics.csv --output results/relative_to_min_angle.csv
++"""
++import argparse
++import csv
++from pathlib import Path
++
++
++PERCENT_METRIC_DIRECTIONS = {
++    "fid": "lower",
++}
++
++DELTA_METRICS = {
++    "kid_mean": "lower",
++}
++
++
++def load_metrics(csv_path):
++    csv_path = Path(csv_path)
++
++    if not csv_path.exists():
++        raise FileNotFoundError(
++            f"Metrics CSV not found: {csv_path}"
++        )
++
++    with csv_path.open("r", encoding="utf-8", newline="") as file:
++        reader = csv.DictReader(file)
++        rows = list(reader)
++
++    if not rows:
++        raise ValueError(
++            f"Metrics CSV is empty: {csv_path}"
++        )
++
++    return rows
++
++
++def validate_columns(rows):
++    required_columns = (
++        {"tag", "angle"}
++        | set(PERCENT_METRIC_DIRECTIONS)
++        | set(DELTA_METRICS)
++    )
++
++    available_columns = set(rows[0].keys())
++    missing = required_columns - available_columns
++
++    if missing:
++        if "angle" in missing and "steps" in available_columns:
++            raise ValueError(
++                "This CSV looks like fine-tuning-steps (EXP02) data — it "
++                "has a 'steps' column but no 'angle' column. "
++                "analyze_angle_baseline_exp01.py is for angle-sweep (EXP01) "
++                "data only. Use scripts/analyze_baseline_exp01.py for "
++                "FT###-based data instead."
++            )
++        raise ValueError(
++            f"Metrics CSV is missing required columns: "
++            f"{sorted(missing)}"
++        )
++
++
++def find_baseline(rows):
++    """
++    The angle sweep has no zero-angle / FT000-equivalent condition — use
++    whichever angle was actually run smallest as the baseline instead.
++    """
++    try:
++        return min(rows, key=lambda row: float(row["angle"]))
++    except (KeyError, ValueError) as e:
++        raise ValueError(
++            f"Could not determine an angle-sweep baseline: {e}"
++        )
++
++
++def relative_percent(baseline_value, condition_value, direction):
++    """
++    Returns percentage improvement relative to baseline.
++
++    Positive = improvement.
++    Negative = degradation.
++    """
++    if baseline_value == 0:
++        return None
++
++    if direction == "higher":
++        return (
++            (condition_value - baseline_value)
++            / baseline_value
++            * 100
++        )
++
++    if direction == "lower":
++        return (
++            (baseline_value - condition_value)
++            / baseline_value
++            * 100
++        )
++
++    raise ValueError(
++        f"Unknown metric direction: {direction}"
++    )
++
++
++def absolute_delta(baseline_value, condition_value):
++    """
++    Returns raw change relative to baseline.
++
++    For lower-is-better metrics:
++    negative = improvement
++    positive = degradation.
++    """
++    return condition_value - baseline_value
++
++
++def _parse_float_or_none(value):
++    """CSV empty-string (written from a JSON null, e.g. KID skipped for
++    <2 frames) means the metric wasn't computed for that row — treat as
++    missing, not a parse error."""
++    if value is None or value == "" or value == "None":
++        return None
++    return float(value)
++
++
++def analyze(rows):
++    validate_columns(rows)
++    baseline = find_baseline(rows)
++    baseline_angle = float(baseline["angle"])
++
++    results = []
++
++    for row in rows:
++        output_row = {
++            "tag": row["tag"],
++            "angle": row["angle"],
++        }
++
++        for metric, direction in PERCENT_METRIC_DIRECTIONS.items():
++            baseline_value = _parse_float_or_none(baseline[metric])
++            condition_value = _parse_float_or_none(row[metric])
++
++            if baseline_value is None or condition_value is None:
++                output_row[f"{metric}_relative_percent"] = None
++                continue
++
++            output_row[f"{metric}_relative_percent"] = (
++                relative_percent(
++                    baseline_value,
++                    condition_value,
++                    direction,
++                )
++            )
++
++        for metric in DELTA_METRICS:
++            baseline_value = _parse_float_or_none(baseline[metric])
++            condition_value = _parse_float_or_none(row[metric])
++
++            if baseline_value is None or condition_value is None:
++                output_row[f"{metric}_delta"] = None
++                continue
++
++            output_row[f"{metric}_delta"] = absolute_delta(
++                baseline_value,
++                condition_value,
++            )
++
++        results.append(output_row)
++
++    return results, baseline_angle
++
++
++def save_results(results, output_path):
++    output_path = Path(output_path)
++    output_path.parent.mkdir(
++        parents=True,
++        exist_ok=True,
++    )
++
++    fieldnames = [
++        "tag",
++        "angle",
++    ]
++
++    for metric in PERCENT_METRIC_DIRECTIONS:
++        fieldnames.append(
++            f"{metric}_relative_percent"
++        )
++
++    for metric in DELTA_METRICS:
++        fieldnames.append(
++            f"{metric}_delta"
++        )
++
++    with output_path.open(
++        "w",
++        encoding="utf-8",
++        newline="",
++    ) as file:
++        writer = csv.DictWriter(
++            file,
++            fieldnames=fieldnames,
++        )
++
++        writer.writeheader()
++        writer.writerows(results)
++
++
++def print_summary(results, baseline_angle):
++    print()
++    print(f"EXP01 Angle-Sweep Baseline-Relative Analysis (baseline: {baseline_angle:g} deg)")
++    print("=" * 90)
++
++    for result in results:
++        print(
++            f"\n{result['tag']} "
++            f"(angle={result['angle']} deg)"
++        )
++
++        for metric in PERCENT_METRIC_DIRECTIONS:
++            value = result[
++                f"{metric}_relative_percent"
++            ]
++
++            if value is None:
++                print(
++                    f"  {metric}: N/A "
++                    f"(not computed for this row)"
++                )
++            else:
++                print(
++                    f"  {metric}: "
++                    f"{value:+.2f}%"
++                )
++
++        for metric in DELTA_METRICS:
++            value = result[f"{metric}_delta"]
++
++            if value is None:
++                print(f"  {metric}_delta: N/A (not computed for this row)")
++            else:
++                print(
++                    f"  {metric}_delta: {value:+.6f}"
++                )
++
++
++def main():
++    parser = argparse.ArgumentParser(
++        description=(
++            "Compute baseline-relative EXP01 angle-sweep analysis "
++            "from P3's final_metrics.csv, using the smallest angle "
++            "actually run as the baseline."
++        )
++    )
++
++    parser.add_argument(
++        "--csv",
++        required=True,
++        help="Path to P3's final_metrics.csv (must have an 'angle' column, e.g. via add_angle.py)",
++    )
++
++    parser.add_argument(
++        "--output",
++        required=True,
++        help="Path for baseline-relative CSV output",
++    )
++
++    args = parser.parse_args()
++
++    rows = load_metrics(args.csv)
++    results, baseline_angle = analyze(rows)
++
++    save_results(results, args.output)
++    print_summary(results, baseline_angle)
++
++    print()
++    print(f"Baseline-relative CSV saved to: {args.output}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/analyze_baseline_exp01.py b/scripts/analyze_baseline_exp01.py
+index fdd1812..91d0dc4 100644
+--- a/scripts/analyze_baseline_exp01.py
++++ b/scripts/analyze_baseline_exp01.py
+@@ -46,6 +46,15 @@ def validate_columns(rows):
+     missing = required_columns - available_columns
+ 
+     if missing:
++        if "steps" in missing and "angle" in available_columns:
++            raise ValueError(
++                "This CSV looks like angle-sweep (EXP01) data — it has an "
++                "'angle' column but no 'steps' column. analyze_baseline_exp01.py "
++                "is for the FT###-based fine-tuning-steps ablation (EXP02) only; "
++                "the angle sweep has no FT000-equivalent baseline. Use "
++                "scripts/analyze_angle_baseline_exp01.py for angle-sweep "
++                "baseline-relative analysis instead."
++            )
+         raise ValueError(
+             f"Metrics CSV is missing required columns: "
+             f"{sorted(missing)}"
+@@ -58,7 +67,9 @@ def find_baseline(rows):
+             return row
+ 
+     raise ValueError(
+-        "Baseline FT000 was not found in the metrics CSV."
++        "Baseline FT000 was not found in the metrics CSV. If this is "
++        "angle-sweep (EXP01) data, it has no FT000-equivalent baseline by "
++        "design — use scripts/analyze_angle_baseline_exp01.py instead."
+     )
+ 
+ 
+diff --git a/src/evaluation/add_angle.py b/src/evaluation/add_angle.py
+index 0708044..651140d 100644
+--- a/src/evaluation/add_angle.py
++++ b/src/evaluation/add_angle.py
+@@ -17,15 +17,27 @@ import re
+ def extract_angle_from_tag(tag: str) -> int:
+     """
+     Extracts the numeric angle from a tag like 'ANGLE015', 'ANGLE030', 'ANGLE090'.
+-    Falls back to any trailing digits if the ANGLE prefix isn't present.
++
++    Deliberately strict: earlier versions fell back to grabbing any trailing
++    digits from the tag, which silently mislabeled fine-tuning-steps tags
++    (e.g. 'FT030' -> angle=30) instead of failing. Add fine-tuning-steps
++    metrics with add_steps.py, not this script.
+     """
+-    match = re.search(r'ANGLE(\d+)', tag, re.IGNORECASE)
+-    if match:
+-        return int(match.group(1))
+-    match = re.search(r'(\d+)$', tag)
++    match = re.search(r'^ANGLE(\d+)$', tag, re.IGNORECASE)
+     if match:
+         return int(match.group(1))
+-    raise ValueError(f"Could not extract angle from tag: {tag}")
++
++    if re.search(r'FT\d+', tag, re.IGNORECASE):
++        raise ValueError(
++            f"Tag '{tag}' looks like a fine-tuning-steps tag (FT### format), "
++            f"not angle-sweep data (ANGLE###). Use add_steps.py for "
++            f"fine-tuning-ablation metrics.json files instead."
++        )
++
++    raise ValueError(
++        f"Could not extract angle from tag: {tag!r}. Expected ANGLE### "
++        f"format (e.g. 'ANGLE015', 'ANGLE030')."
++    )
+ 
+ 
+ def main():
+diff --git a/src/evaluation/add_steps.py b/src/evaluation/add_steps.py
+index 1520203..cf3a419 100644
+--- a/src/evaluation/add_steps.py
++++ b/src/evaluation/add_steps.py
+@@ -17,16 +17,27 @@ import re
+ def extract_steps_from_tag(tag: str) -> int:
+     """
+     Extracts the numeric step count from a tag like 'FT000', 'FT050', 'FT100', 'FT200'.
+-    Falls back to extracting any trailing digits if the FT prefix isn't present.
++
++    Deliberately strict: earlier versions fell back to grabbing any trailing
++    digits from the tag, which silently mislabeled angle-sweep tags (e.g.
++    'ANGLE030' -> steps=30) instead of failing. Add angle-sweep metrics with
++    add_angle.py, not this script.
+     """
+-    match = re.search(r'FT(\d+)', tag)
+-    if match:
+-        return int(match.group(1))
+-    # fallback: last underscore-separated numeric chunk, e.g. EXP01_100 -> 100
+-    match = re.search(r'(\d+)$', tag)
++    match = re.search(r'^FT(\d+)$', tag)
+     if match:
+         return int(match.group(1))
+-    raise ValueError(f"Could not extract step count from tag: {tag}")
++
++    if re.search(r'ANGLE\d+', tag, re.IGNORECASE):
++        raise ValueError(
++            f"Tag '{tag}' looks like angle-sweep data (ANGLE### format), "
++            f"not a fine-tuning-steps tag (FT###). Use add_angle.py for "
++            f"angle-sweep metrics.json files instead."
++        )
++
++    raise ValueError(
++        f"Could not extract step count from tag: {tag!r}. Expected FT### "
++        f"format (e.g. 'FT000', 'FT100')."
++    )
+ 
+ 
+ def main():
+diff --git a/tests/test_tag_format_analysis.py b/tests/test_tag_format_analysis.py
+new file mode 100644
+index 0000000..94504f5
+--- /dev/null
++++ b/tests/test_tag_format_analysis.py
+@@ -0,0 +1,122 @@
++"""
++Covers issue #6: add_steps.py / add_angle.py used to fall back to grabbing
++any trailing digits from a tag, which silently mislabeled the other
++experiment's data (ANGLE030 -> steps=30, or FT030 -> angle=30) instead of
++failing. analyze_baseline_exp01.py is hardcoded around FT###/FT000, which
++doesn't exist for angle-sweep data, and previously only failed with a
++generic missing-columns error instead of explaining why. Fixed by:
++  - making both tag extractors strict, with a clear cross-pointer error
++    when they see the other experiment's tag shape
++  - giving analyze_baseline_exp01.py a specific, guided error for
++    angle-sweep-shaped CSVs
++  - adding scripts/analyze_angle_baseline_exp01.py, the angle-sweep
++    counterpart docs/p2_analysis_workflow.md already promised
++"""
++import pytest
++
++from src.evaluation.add_steps import extract_steps_from_tag
++from src.evaluation.add_angle import extract_angle_from_tag
++from scripts.analyze_baseline_exp01 import validate_columns as ft_validate_columns
++from scripts.analyze_angle_baseline_exp01 import (
++    analyze as angle_analyze,
++    find_baseline as angle_find_baseline,
++    validate_columns as angle_validate_columns,
++)
++
++
++# -- add_steps.py / add_angle.py: no more silent cross-mislabeling --------
++
++def test_add_steps_accepts_ft_tag():
++    assert extract_steps_from_tag("FT100") == 100
++
++
++def test_add_steps_rejects_angle_tag_with_clear_error():
++    with pytest.raises(ValueError, match="angle-sweep"):
++        extract_steps_from_tag("ANGLE030")
++
++
++def test_add_steps_rejects_unrecognized_tag():
++    with pytest.raises(ValueError):
++        extract_steps_from_tag("mystery_tag")
++
++
++def test_add_angle_accepts_angle_tag():
++    assert extract_angle_from_tag("ANGLE030") == 30
++
++
++def test_add_angle_rejects_ft_tag_with_clear_error():
++    with pytest.raises(ValueError, match="fine-tuning-steps"):
++        extract_angle_from_tag("FT100")
++
++
++def test_add_angle_rejects_unrecognized_tag():
++    with pytest.raises(ValueError):
++        extract_angle_from_tag("mystery_tag")
++
++
++# -- analyze_baseline_exp01.py: guided error on angle-sweep data ----------
++
++def make_angle_rows():
++    return [
++        {
++            "tag": "ANGLE015", "angle": "15",
++            "psnr": "", "ssim": "", "lpips": "",
++            "fid": "20.0", "kid_mean": "-0.008",
++        },
++        {
++            "tag": "ANGLE030", "angle": "30",
++            "psnr": "", "ssim": "", "lpips": "",
++            "fid": "25.0", "kid_mean": "-0.004",
++        },
++    ]
++
++
++def test_ft_analyzer_rejects_angle_sweep_csv_with_guided_error():
++    with pytest.raises(ValueError, match="analyze_angle_baseline_exp01"):
++        ft_validate_columns(make_angle_rows())
++
++
++# -- scripts/analyze_angle_baseline_exp01.py -------------------------------
++
++def test_angle_analyzer_rejects_ft_csv_with_guided_error():
++    ft_rows = [
++        {
++            "tag": "FT000", "steps": "0",
++            "psnr": "20.0", "ssim": "0.9", "lpips": "0.1",
++            "fid": "20.0", "kid_mean": "-0.008",
++        },
++    ]
++    with pytest.raises(ValueError, match="analyze_baseline_exp01"):
++        angle_validate_columns(ft_rows)
++
++
++def test_angle_analyzer_finds_smallest_angle_as_baseline():
++    baseline = angle_find_baseline(make_angle_rows())
++    assert baseline["tag"] == "ANGLE015"
++
++
++def test_angle_analyzer_produces_expected_results():
++    results, baseline_angle = angle_analyze(make_angle_rows())
++
++    assert baseline_angle == pytest.approx(15.0)
++    assert len(results) == 2
++
++    baseline_row, condition_row = results
++    assert baseline_row["fid_relative_percent"] == pytest.approx(0.0)
++    assert baseline_row["kid_mean_delta"] == pytest.approx(0.0)
++
++    # fid is lower-is-better: condition (25.0) worse than baseline (20.0)
++    # -> negative relative percent (degradation)
++    assert condition_row["fid_relative_percent"] == pytest.approx(-25.0)
++    assert condition_row["kid_mean_delta"] == pytest.approx(0.004)
++
++
++def test_angle_analyzer_treats_missing_metric_as_null_not_error():
++    rows = make_angle_rows()
++    rows[1]["kid_mean"] = ""  # e.g. KID skipped for <2 frames
++
++    results, _ = angle_analyze(rows)
++
++    assert results[1]["kid_mean_delta"] is None
++    # fid still computed even though kid_mean was missing for this row
++    assert results[1]["fid_relative_percent"] is not None

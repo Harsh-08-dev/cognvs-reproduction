@@ -17,16 +17,27 @@ import re
 def extract_steps_from_tag(tag: str) -> int:
     """
     Extracts the numeric step count from a tag like 'FT000', 'FT050', 'FT100', 'FT200'.
-    Falls back to extracting any trailing digits if the FT prefix isn't present.
+
+    Deliberately strict: earlier versions fell back to grabbing any trailing
+    digits from the tag, which silently mislabeled angle-sweep tags (e.g.
+    'ANGLE030' -> steps=30) instead of failing. Add angle-sweep metrics with
+    add_angle.py, not this script.
     """
-    match = re.search(r'FT(\d+)', tag)
+    match = re.search(r'^FT(\d+)$', tag)
     if match:
         return int(match.group(1))
-    # fallback: last underscore-separated numeric chunk, e.g. EXP01_100 -> 100
-    match = re.search(r'(\d+)$', tag)
-    if match:
-        return int(match.group(1))
-    raise ValueError(f"Could not extract step count from tag: {tag}")
+
+    if re.search(r'ANGLE\d+', tag, re.IGNORECASE):
+        raise ValueError(
+            f"Tag '{tag}' looks like angle-sweep data (ANGLE### format), "
+            f"not a fine-tuning-steps tag (FT###). Use add_angle.py for "
+            f"angle-sweep metrics.json files instead."
+        )
+
+    raise ValueError(
+        f"Could not extract step count from tag: {tag!r}. Expected FT### "
+        f"format (e.g. 'FT000', 'FT100')."
+    )
 
 
 def main():

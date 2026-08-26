@@ -41,3 +41,9 @@ For these runs:
   source video frames) as the "real" reference distribution.
 - Visual/qualitative comparison via `comparison.py` becomes the primary evidence
   for this experiment, alongside FID/KID trends across angles.
+- Baseline-relative comparison uses `scripts/analyze_angle_baseline_exp01.py`,
+  which compares each angle's FID/KID to the smallest angle actually run
+  (there's no zero-angle/FT000-equivalent condition to use instead). Don't
+  point `scripts/analyze_baseline_exp01.py` (the FT000-baseline script) at
+  this data — it's for the FT###-based fine-tuning-steps ablation and will
+  refuse to run against angle-sweep CSVs.
