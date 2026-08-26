@@ -1,5 +1,19 @@
 # Environment Setup
 
+This repo spans three separate Python environments. Which one(s) you need
+depends on what you're running:
+
+| Environment | Covers | Requirements file | GPU needed? |
+|---|---|---|---|
+| Upstream CogNVS | Actually running CogNVS inference (`data_gen.py`, `demo.py` inside `cognvs-codebase`) | `cognvs_requirements.txt` (in `cognvs-codebase`, not this repo) | Yes (see below) |
+| Orchestration tooling | `src/experiments/`, `scripts/validate_experiment.py`, `scripts/analyze_baseline_exp01.py`, running this repo's test suite | `requirements.txt` | No |
+| Evaluation & visualization | `src/evaluation/` (`evaluate.py`, `metrics.py`, `fid_kid.py`, `aggregator.py`, `add_angle.py`, `add_steps.py`, `video_utils.py`) and `src/visualization/` (`plots.py`, `comparison.py`) | `requirements-eval.txt` | No (CPU works, just slower) |
+
+You don't need all three for every task — e.g. validating a config or
+running `pytest` only needs the orchestration tooling env; running
+`evaluate.py` on already-generated frames only needs the eval env, not the
+upstream CogNVS env at all.
+
 ## Upstream dependency
 
 - Repo: https://github.com/Kaihua-Chen/cog-nvs
@@ -9,6 +23,8 @@
 - Local install location: sibling folder `cognvs-codebase`, next to this repo
 
 ## Setup steps
+
+### 1. Upstream CogNVS environment (only needed to actually run inference)
 
 1. Clone the upstream repository (kept OUTSIDE this repo, as a sibling folder):
    git clone https://github.com/Kaihua-Chen/cog-nvs cognvs-codebase
@@ -23,6 +39,21 @@
 3. Download checkpoints (see cognvs-codebase README for exact links):
    - CogVideoX-5b-I2V base model (from HuggingFace)
    - CogNVS inpainting checkpoint
+
+### 2. This repo's orchestration tooling (needed for the test suite, config validation, ExperimentRunner)
+
+   conda create --name cognvs-repro python=3.11
+   conda activate cognvs-repro
+   pip install -r requirements.txt
+
+### 3. This repo's evaluation & visualization tooling (needed for evaluate.py, aggregator.py, plots.py, comparison.py)
+
+   conda activate cognvs-repro
+   pip install -r requirements-eval.txt
+
+Environments 2 and 3 can live in the same conda env (as above) since neither
+needs a GPU — they're only split into two requirements files so running the
+orchestration tests doesn't require pulling in torch/lpips/torchmetrics.
 
 ## Verification
 
