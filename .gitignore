@@ -38,3 +38,7 @@ results/
 # Temporary files
 tmp/
 temp/
+
+# Generated analysis outputs
+analysis/*.csv
+analysis/plots/
