@@ -147,6 +147,33 @@ def collect_outputs(codebase_path: Path, repo_root: Path, sequence: str, angle: 
     return dest_dir
 
 
+def run_inference(codebase_path: Path, repo_root: Path, sequence: str, angle: int, dry_run: bool):
+    """
+    Runs the full zero-shot angle-sweep pipeline (swap trajectory -> data_gen
+    -> restore trajectory -> demo) and returns (elapsed_seconds, output_video_path),
+    where output_video_path is the raw video produced inside cognvs-codebase
+    (not yet copied anywhere).
+
+    This is the single orchestration entry point for EXP01. Both this script's
+    own CLI (main(), below) and ExperimentRunner.execute() in
+    src/experiments/runner.py call this function, so there is exactly one
+    place that knows how to drive the upstream CogNVS codebase.
+    """
+    start_time = time.time()
+    backup_dir = swap_trajectory(codebase_path, angle, repo_root)
+    try:
+        run_data_gen(codebase_path, sequence, dry_run)
+    finally:
+        # always restore, even if data_gen fails, so we never leave their repo altered
+        restore_trajectory(codebase_path, backup_dir)
+
+    run_demo(codebase_path, sequence, dry_run)
+    elapsed = time.time() - start_time
+
+    output_video = codebase_path / "demo_data" / sequence / "outputs" / "eval_render1_out.mp4"
+    return elapsed, output_video
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run CogNVS zero-shot inference at a given novel-view angle")
     parser.add_argument("--sequence", type=str, required=True, help="e.g. davis_bear, sora_balloon")
@@ -168,16 +195,7 @@ def main():
     print(f"[run_cognvs] Using codebase at: {codebase_path}")
     print(f"[run_cognvs] Sequence: {args.sequence}, Angle: {args.angle} deg, Dry run: {args.dry_run}")
 
-    start_time = time.time()
-    backup_dir = swap_trajectory(codebase_path, args.angle, repo_root)
-    try:
-        run_data_gen(codebase_path, args.sequence, args.dry_run)
-    finally:
-        # always restore, even if data_gen fails, so we never leave their repo altered
-        restore_trajectory(codebase_path, backup_dir)
-
-    run_demo(codebase_path, args.sequence, args.dry_run)
-    elapsed = time.time() - start_time
+    elapsed, _ = run_inference(codebase_path, repo_root, args.sequence, args.angle, args.dry_run)
 
     collect_outputs(codebase_path, repo_root, args.sequence, args.angle, elapsed, args.dry_run)
 

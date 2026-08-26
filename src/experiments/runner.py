@@ -1,4 +1,6 @@
 import argparse
+import json
+import shutil
 from pathlib import Path
 
 import yaml
@@ -15,6 +17,7 @@ from src.experiments.metadata import (
     save_config_copy,
     init_runtime_placeholder,
 )
+from src.inference.run_cognvs import find_codebase_path, run_inference
 
 
 class ExperimentRunner:
@@ -53,26 +56,64 @@ class ExperimentRunner:
 
     def execute(self):
         """
-        P1 implements this method to actually run CogNVS for this run's
-        config once the inference interface (checkpoint loading, test-time
-        fine-tuning, generation call) is confirmed.
+        Runs EXP01 (zero-shot angle-sweep) by calling into
+        src/inference/run_cognvs.py's run_inference(), which owns all
+        knowledge of how to drive the upstream cognvs-codebase (trajectory
+        swap, data_gen, demo). This keeps P1's inference logic in one place
+        instead of duplicating it here.
 
         By the time execute() is called, prepare() has already created:
-          - self.frames_dir  : write generated frames here as *.png
-                                (or write a single video to self.video_path)
+          - self.frames_dir  : *.png frame extraction lands here in a later
+                                pipeline step (see issue #3) — not written by
+                                this method
+          - self.video_path  : where this method copies the generated video
           - self.output_dir/config.yaml   : copy of self.config
-          - self.runtime_path              : runtime.json placeholder to
-                                              overwrite with real
-                                              runtime_seconds / peak GPU
-                                              memory / gpu_name once the
-                                              run finishes
+          - self.runtime_path              : runtime.json placeholder,
+                                              overwritten below with the
+                                              real runtime once the run
+                                              finishes
+
+        Required config keys: input_sequence (str, e.g. "davis_bear"),
+        angle_deg (int, e.g. 30). Optional: codebase_path, dry_run.
 
         Do not change these paths/filenames — P3's evaluate.py and
         aggregator.py are already wired to read from this exact layout.
         """
-        raise NotImplementedError(
-            "CogNVS execution interface has not been connected yet."
+        dry_run = bool(self.config.get("dry_run", False))
+        codebase_path = find_codebase_path(self.config.get("codebase_path"))
+        repo_root = Path(__file__).resolve().parents[2]
+
+        if not codebase_path.exists():
+            raise FileNotFoundError(
+                f"codebase path not found at {codebase_path}; pass "
+                f"'codebase_path' in the config if your layout differs "
+                f"from the standard sibling-folder structure."
+            )
+
+        sequence = self.config["input_sequence"]
+        angle = self.config["angle_deg"]
+
+        elapsed, output_video = run_inference(
+            codebase_path, repo_root, sequence, angle, dry_run
         )
+
+        if dry_run:
+            print(f"[ExperimentRunner] DRY RUN — would copy {output_video} -> {self.video_path}")
+        else:
+            shutil.copy(str(output_video), str(self.video_path))
+
+        runtime = {
+            "status": "complete",
+            "runtime_seconds": elapsed,
+            "peak_gpu_memory_mb": None,
+            "gpu_name": None,
+            "notes": "dry_run" if dry_run else None,
+        }
+        with open(self.runtime_path, "w", encoding="utf-8") as f:
+            json.dump(runtime, f, indent=2)
+
+        self.metadata["status"] = "complete"
+        save_metadata(self.metadata, self.output_dir)
 
     def run(self):
         self.prepare()
@@ -106,21 +147,28 @@ def main():
         required=True,
         help="Path to the experiment YAML configuration.",
     )
+    parser.add_argument(
+        "--dry_run",
+        action="store_true",
+        help="Verify config/output-layout logic without running GPU inference.",
+    )
 
     args = parser.parse_args()
 
     config = load_config(args.config)
+    if args.dry_run:
+        config["dry_run"] = True
 
     print(f"Loaded experiment: {config['run_id']}")
-    print(f"Fine-tuning steps: {config['fine_tuning_steps']}")
     print(f"Input sequence: {config['input_sequence']}")
+    print(f"Angle (deg): {config.get('angle_deg')}")
     print(f"Checkpoint: {config['checkpoint']}")
     print(f"Output directory: {config['output_dir']}")
 
     runner = ExperimentRunner(config)
-    runner.prepare()
+    runner.run()
 
-    print("Experiment preparation completed.")
+    print("Experiment run completed.")
     print(f"Output directory: {runner.output_dir}")
 
 

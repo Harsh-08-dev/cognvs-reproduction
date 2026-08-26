@@ -1,0 +1,12 @@
+# EXP01 — zero-shot angle-sweep (see docs/p2_analysis_workflow.md).
+# fine_tuning_steps is fixed at 0 for every EXP01 run: this experiment is
+# zero-shot by definition, no test-time fine-tuning is performed.
+experiment_id: EXP01
+run_id: EXP01_davis_bear_angle030
+input_sequence: davis_bear
+angle_deg: 30
+checkpoint: cognvs_ckpt_inpaint
+fine_tuning_steps: 0
+resolution: 480p
+seed: 0
+output_dir: results/EXP01/davis_bear/angle_030
