@@ -7,6 +7,7 @@ REQUIRED_FIELDS = [
     "experiment_id",
     "run_id",
     "input_sequence",
+    "angle_deg",
     "checkpoint",
     "fine_tuning_steps",
     "resolution",
@@ -50,6 +51,12 @@ def validate_values(config):
 
     if config["fine_tuning_steps"] < 0:
         raise ValueError("fine_tuning_steps cannot be negative.")
+
+    if not isinstance(config["angle_deg"], (int, float)) or isinstance(config["angle_deg"], bool):
+        raise ValueError("angle_deg must be a number.")
+
+    if config["angle_deg"] <= 0:
+        raise ValueError("angle_deg must be positive.")
 
     if not isinstance(config["seed"], int):
         raise ValueError("seed must be an integer.")

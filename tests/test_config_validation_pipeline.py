@@ -76,6 +76,7 @@ def test_prepare_writes_metadata_with_prepared_status(tmp_path):
     assert metadata["status"] == "prepared"
     assert metadata["run_id"] == config["run_id"]
     assert metadata["input_sequence"] == config["input_sequence"]
+    assert metadata["angle_deg"] == config["angle_deg"]
 
 
 def test_prepare_writes_not_run_runtime_placeholder(tmp_path):
@@ -94,7 +95,7 @@ def test_prepare_writes_not_run_runtime_placeholder(tmp_path):
 # -- configs P2's validator rejects should never reach prepare() -----------
 
 @pytest.mark.parametrize("missing_field", [
-    "experiment_id", "run_id", "input_sequence", "checkpoint",
+    "experiment_id", "run_id", "input_sequence", "angle_deg", "checkpoint",
     "fine_tuning_steps", "resolution", "seed", "output_dir",
 ])
 def test_validate_required_fields_catches_each_missing_field_before_prepare(
@@ -122,6 +123,24 @@ def test_validate_values_rejects_non_integer_seed_before_prepare(tmp_path):
 
     validate_required_fields(config)
     with pytest.raises(ValueError, match="seed must be an integer"):
+        validate_values(config)
+
+
+def test_validate_values_rejects_non_numeric_angle_deg_before_prepare(tmp_path):
+    config = make_valid_config(tmp_path)
+    config["angle_deg"] = "thirty"
+
+    validate_required_fields(config)
+    with pytest.raises(ValueError, match="angle_deg must be a number"):
+        validate_values(config)
+
+
+def test_validate_values_rejects_zero_or_negative_angle_deg_before_prepare(tmp_path):
+    config = make_valid_config(tmp_path)
+    config["angle_deg"] = 0
+
+    validate_required_fields(config)
+    with pytest.raises(ValueError, match="angle_deg must be positive"):
         validate_values(config)
 
 

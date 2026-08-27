@@ -40,7 +40,10 @@ For these runs:
 - `fid`/`kid_mean`/`kid_std` are computed against `--reference_dir` (the original
   source video frames) as the "real" reference distribution.
 - Visual/qualitative comparison via `comparison.py` becomes the primary evidence
-  for this experiment, alongside FID/KID trends across angles.
+  for this experiment, alongside FID/KID trends across angles. Use its `--no_gt
+  --reference_dir <source_frames>` mode (Source | Generated rows, no diff) —
+  the plain paired mode requires `--gt_dir` and will refuse to run without it,
+  since there's no pixel-aligned GT to diff against here.
 - Baseline-relative comparison uses `scripts/analyze_angle_baseline_exp01.py`,
   which compares each angle's FID/KID to the smallest angle actually run
   (there's no zero-angle/FT000-equivalent condition to use instead). Don't

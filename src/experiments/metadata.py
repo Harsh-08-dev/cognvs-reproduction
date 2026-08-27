@@ -12,6 +12,7 @@ def create_metadata(config):
         "experiment_id": config["experiment_id"],
         "run_id": config["run_id"],
         "input_sequence": config["input_sequence"],
+        "angle_deg": config.get("angle_deg"),
         "checkpoint": config["checkpoint"],
         "fine_tuning_steps": config["fine_tuning_steps"],
         "resolution": config["resolution"],
