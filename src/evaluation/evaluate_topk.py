@@ -25,7 +25,7 @@ import json
 import os
 import cv2
 
-from fid_kid import compute_fid, compute_kid
+from src.evaluation.fid_kid import compute_fid, compute_kid
 
 
 def load_frames(frame_dir):
