@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large video files
+*.mp4
+*.avi
+*.mov
+
+# Large model files
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npy
+
+# Data
+data/
+datasets/
+
+# Generated outputs
+results/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+
+# Generated analysis outputs
+analysis/*.csv
+analysis/plots/
+
+# Safety net: sibling folder holding CMU's CogNVS codebase
+cognvs-codebase/

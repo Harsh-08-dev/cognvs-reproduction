@@ -1,0 +1,572 @@
+diff --git a/tests/test_config_validation_pipeline.py b/tests/test_config_validation_pipeline.py
+new file mode 100644
+index 0000000..34796a6
+--- /dev/null
++++ b/tests/test_config_validation_pipeline.py
+@@ -0,0 +1,157 @@
++"""
++Covers issue #7 (part 2): config validation (scripts/validate_experiment.py,
++P2's tooling) and ExperimentRunner.prepare()'s output layout were only ever
++exercised separately. Nothing tested that a config which *passes*
++validate_required_fields()/validate_values() actually produces the output
++layout prepare() promises, or that prepare() surfaces the same missing/bad
++fields validate_experiment.py is meant to catch before a real (GPU) run is
++attempted.
++
++No GPU/codebase needed — prepare() never touches cognvs-codebase, only the
++output directory.
++"""
++import json
++
++import pytest
++import yaml
++
++from scripts.validate_experiment import validate_required_fields, validate_values
++from src.experiments.runner import ExperimentRunner, load_config
++
++
++def make_valid_config(tmp_path):
++    return {
++        "experiment_id": "EXP01",
++        "run_id": "EXP01_davis_bear_angle030",
++        "input_sequence": "davis_bear",
++        "angle_deg": 30,
++        "checkpoint": "cognvs_ckpt_inpaint",
++        "fine_tuning_steps": 0,
++        "resolution": "480p",
++        "seed": 0,
++        "output_dir": str(tmp_path / "out"),
++    }
++
++
++# -- a config that passes P2's validator actually works with prepare() -----
++
++def test_validated_config_produces_expected_prepare_layout(tmp_path):
++    config = make_valid_config(tmp_path)
++
++    # must pass P2's own pre-flight checks first
++    validate_required_fields(config)
++    validate_values(config)
++
++    runner = ExperimentRunner(config)
++    runner.prepare()
++
++    produced = {p.name for p in runner.output_dir.iterdir()}
++    assert {"frames", "config.yaml", "metadata.json", "runtime.json"} <= produced
++    assert runner.frames_dir == runner.output_dir / "frames"
++    assert runner.frames_dir.is_dir()
++    assert list(runner.frames_dir.iterdir()) == []  # empty until execute()
++
++
++def test_prepare_writes_config_copy_matching_input_config(tmp_path):
++    config = make_valid_config(tmp_path)
++    validate_required_fields(config)
++    validate_values(config)
++
++    runner = ExperimentRunner(config)
++    runner.prepare()
++
++    written = yaml.safe_load((runner.output_dir / "config.yaml").read_text())
++    assert written == config
++
++
++def test_prepare_writes_metadata_with_prepared_status(tmp_path):
++    config = make_valid_config(tmp_path)
++    validate_required_fields(config)
++    validate_values(config)
++
++    runner = ExperimentRunner(config)
++    runner.prepare()
++
++    metadata = json.loads((runner.output_dir / "metadata.json").read_text())
++    assert metadata["status"] == "prepared"
++    assert metadata["run_id"] == config["run_id"]
++    assert metadata["input_sequence"] == config["input_sequence"]
++
++
++def test_prepare_writes_not_run_runtime_placeholder(tmp_path):
++    config = make_valid_config(tmp_path)
++    validate_required_fields(config)
++    validate_values(config)
++
++    runner = ExperimentRunner(config)
++    runner.prepare()
++
++    runtime = json.loads(runner.runtime_path.read_text())
++    assert runtime["status"] == "not_run"
++    assert runtime["runtime_seconds"] is None
++
++
++# -- configs P2's validator rejects should never reach prepare() -----------
++
++@pytest.mark.parametrize("missing_field", [
++    "experiment_id", "run_id", "input_sequence", "checkpoint",
++    "fine_tuning_steps", "resolution", "seed", "output_dir",
++])
++def test_validate_required_fields_catches_each_missing_field_before_prepare(
++    tmp_path, missing_field
++):
++    config = make_valid_config(tmp_path)
++    del config[missing_field]
++
++    with pytest.raises(ValueError, match="Missing required fields"):
++        validate_required_fields(config)
++
++
++def test_validate_values_rejects_negative_fine_tuning_steps_before_prepare(tmp_path):
++    config = make_valid_config(tmp_path)
++    config["fine_tuning_steps"] = -5
++
++    validate_required_fields(config)  # all fields present, so this passes
++    with pytest.raises(ValueError, match="fine_tuning_steps cannot be negative"):
++        validate_values(config)
++
++
++def test_validate_values_rejects_non_integer_seed_before_prepare(tmp_path):
++    config = make_valid_config(tmp_path)
++    config["seed"] = "zero"
++
++    validate_required_fields(config)
++    with pytest.raises(ValueError, match="seed must be an integer"):
++        validate_values(config)
++
++
++def test_prepare_itself_raises_keyerror_on_a_config_the_validator_would_reject(tmp_path):
++    """If validate_experiment.py is ever skipped, prepare() (via
++    metadata.create_metadata) still fails loudly on a config missing a
++    required field, rather than silently writing incomplete metadata."""
++    config = make_valid_config(tmp_path)
++    del config["checkpoint"]  # validate_required_fields would have caught this
++
++    runner = ExperimentRunner(config)
++    with pytest.raises(KeyError):
++        runner.prepare()
++
++
++# -- the on-disk example config (configs/exp01_davis_bear_angle030.yaml)
++# is itself valid and produces the expected layout end-to-end --------------
++
++def test_shipped_exp01_config_is_valid_and_prepares_successfully(tmp_path):
++    config = load_config("configs/exp01_davis_bear_angle030.yaml")
++    validate_required_fields(config)
++    validate_values(config)
++
++    # redirect output_dir into tmp_path so this test doesn't write into
++    # the real results/ folder
++    config = dict(config)
++    config["output_dir"] = str(tmp_path / "out")
++
++    runner = ExperimentRunner(config)
++    runner.prepare()
++
++    produced = {p.name for p in runner.output_dir.iterdir()}
++    assert {"frames", "config.yaml", "metadata.json", "runtime.json"} <= produced
+diff --git a/tests/test_evaluate_branches.py b/tests/test_evaluate_branches.py
+new file mode 100644
+index 0000000..262d652
+--- /dev/null
++++ b/tests/test_evaluate_branches.py
+@@ -0,0 +1,233 @@
++"""
++Covers issue #7 (part 3): tests/test_evaluate_imports.py (issue #4) only
++exercises evaluate.py's --no_gt / no --reference_dir path, to prove the
++import fix works. It never exercises the paired ground-truth branch, the
++--no_gt + --reference_dir branch (which DOES compute FID/KID), the
++frame-count-mismatch guard, or the "--gt_dir required unless --no_gt"
++guard. This file covers those, using the same sys.modules stub for
++torch/lpips/skimage/torchmetrics as test_evaluate_imports.py, so it runs
++without requirements-eval.txt installed — but then replaces the imported
++compute_* functions with small deterministic fakes, so what's under test
++is evaluate.py's own branching/aggregation logic, not the real metric
++math (that's covered separately by test_eval_dependencies.py once the
++real eval stack is installed).
++"""
++import json
++import sys
++import types
++from unittest.mock import MagicMock
++
++import cv2
++import numpy as np
++import pytest
++
++
++def _stub_heavy_deps(monkeypatch):
++    """Same stand-ins as tests/test_evaluate_imports.py, so metrics.py/
++    fid_kid.py import cleanly without torch/lpips/skimage/torchmetrics
++    actually installed."""
++    torch_mod = MagicMock()
++    torch_mod.no_grad.return_value.__enter__ = MagicMock()
++    torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
++    monkeypatch.setitem(sys.modules, "torch", torch_mod)
++    monkeypatch.setitem(sys.modules, "lpips", MagicMock())
++
++    skimage_mod = types.ModuleType("skimage")
++    skimage_metrics_mod = MagicMock()
++    monkeypatch.setitem(sys.modules, "skimage", skimage_mod)
++    monkeypatch.setitem(sys.modules, "skimage.metrics", skimage_metrics_mod)
++
++    torchmetrics_mod = types.ModuleType("torchmetrics")
++    torchmetrics_image_mod = types.ModuleType("torchmetrics.image")
++    monkeypatch.setitem(sys.modules, "torchmetrics", torchmetrics_mod)
++    monkeypatch.setitem(sys.modules, "torchmetrics.image", torchmetrics_image_mod)
++    monkeypatch.setitem(sys.modules, "torchmetrics.image.fid", MagicMock())
++    monkeypatch.setitem(sys.modules, "torchmetrics.image.kid", MagicMock())
++
++
++def _fresh_import_evaluate(monkeypatch):
++    _stub_heavy_deps(monkeypatch)
++    for name in ("src.evaluation.metrics", "src.evaluation.fid_kid", "src.evaluation.evaluate"):
++        sys.modules.pop(name, None)
++    import importlib
++    return importlib.import_module("src.evaluation.evaluate")
++
++
++def _write_frames(dir_path, num_frames, fill=0):
++    dir_path.mkdir(parents=True, exist_ok=True)
++    for i in range(num_frames):
++        cv2.imwrite(str(dir_path / f"{i:04d}.png"), np.full((8, 8, 3), fill, dtype=np.uint8))
++
++
++@pytest.fixture
++def evaluate_module(monkeypatch):
++    module = _fresh_import_evaluate(monkeypatch)
++
++    # Deterministic fakes standing in for the real metric math, so these
++    # tests check evaluate.py's control flow, not skimage/torchmetrics.
++    monkeypatch.setattr(module, "compute_psnr", lambda gen, gt: 30.0)
++    monkeypatch.setattr(module, "compute_ssim", lambda gen, gt: 0.9)
++    monkeypatch.setattr(module, "compute_lpips", lambda gen, gt, device="cpu": 0.1)
++    monkeypatch.setattr(module, "compute_fid", lambda gen, ref, device="cpu": 12.5)
++    monkeypatch.setattr(module, "compute_kid", lambda gen, ref, device="cpu": (0.01, 0.002))
++
++    return module
++
++
++# -- paired ground-truth branch ---------------------------------------------
++
++def test_paired_gt_branch_computes_all_metrics(tmp_path, monkeypatch, evaluate_module):
++    gen_dir = tmp_path / "gen"
++    gt_dir = tmp_path / "gt"
++    _write_frames(gen_dir, 3)
++    _write_frames(gt_dir, 3)
++    out_path = tmp_path / "metrics.json"
++
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--gt_dir", str(gt_dir),
++        "--out", str(out_path),
++        "--tag", "FT100",
++    ])
++
++    evaluate_module.main()
++
++    results = json.loads(out_path.read_text())
++    assert results["tag"] == "FT100"
++    assert results["num_frames"] == 3
++    assert results["psnr"] == pytest.approx(30.0)
++    assert results["ssim"] == pytest.approx(0.9)
++    assert results["lpips"] == pytest.approx(0.1)
++    assert results["fid"] == pytest.approx(12.5)
++    assert results["kid_mean"] == pytest.approx(0.01)
++    assert results["kid_std"] == pytest.approx(0.002)
++
++
++def test_paired_gt_branch_rejects_frame_count_mismatch(tmp_path, monkeypatch, evaluate_module):
++    gen_dir = tmp_path / "gen"
++    gt_dir = tmp_path / "gt"
++    _write_frames(gen_dir, 3)
++    _write_frames(gt_dir, 2)  # deliberately mismatched
++    out_path = tmp_path / "metrics.json"
++
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--gt_dir", str(gt_dir),
++        "--out", str(out_path),
++        "--tag", "FT100",
++    ])
++
++    with pytest.raises(AssertionError, match="Frame count mismatch"):
++        evaluate_module.main()
++
++    assert not out_path.exists()
++
++
++def test_paired_gt_branch_handles_kid_skip_for_too_few_frames(tmp_path, monkeypatch, evaluate_module):
++    """compute_kid raising ValueError (e.g. <2 frames) must be caught and
++    recorded as a null pair, not crash the whole run."""
++    def raising_kid(gen, ref, device="cpu"):
++        raise ValueError("Need at least 2 frames per set to compute KID.")
++
++    monkeypatch.setattr(evaluate_module, "compute_kid", raising_kid)
++
++    gen_dir = tmp_path / "gen"
++    gt_dir = tmp_path / "gt"
++    _write_frames(gen_dir, 1)
++    _write_frames(gt_dir, 1)
++    out_path = tmp_path / "metrics.json"
++
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--gt_dir", str(gt_dir),
++        "--out", str(out_path),
++        "--tag", "FT000",
++    ])
++
++    evaluate_module.main()
++
++    results = json.loads(out_path.read_text())
++    assert results["kid_mean"] is None
++    assert results["kid_std"] is None
++    assert results["fid"] == pytest.approx(12.5)  # FID still computed
++
++
++def test_missing_gt_dir_without_no_gt_raises(tmp_path, monkeypatch, evaluate_module):
++    gen_dir = tmp_path / "gen"
++    _write_frames(gen_dir, 3)
++    out_path = tmp_path / "metrics.json"
++
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--out", str(out_path),
++        "--tag", "FT100",
++        # neither --gt_dir nor --no_gt given
++    ])
++
++    with pytest.raises(ValueError, match="--gt_dir is required unless --no_gt is set"):
++        evaluate_module.main()
++
++
++# -- --no_gt branch WITH --reference_dir (FID/KID computed, unlike the
++# --no_gt-without-reference_dir case test_evaluate_imports.py covers) ------
++
++def test_no_gt_branch_with_reference_dir_computes_fid_kid_but_not_paired_metrics(
++    tmp_path, monkeypatch, evaluate_module
++):
++    gen_dir = tmp_path / "gen"
++    reference_dir = tmp_path / "reference"
++    _write_frames(gen_dir, 4)
++    _write_frames(reference_dir, 6)  # doesn't need to match gen count — unpaired
++    out_path = tmp_path / "metrics.json"
++
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--no_gt",
++        "--reference_dir", str(reference_dir),
++        "--out", str(out_path),
++        "--tag", "ANGLE060",
++    ])
++
++    evaluate_module.main()
++
++    results = json.loads(out_path.read_text())
++    assert results["tag"] == "ANGLE060"
++    assert results["num_frames"] == 4
++    # no paired ground truth -> these stay null
++    assert results["psnr"] is None
++    assert results["ssim"] is None
++    assert results["lpips"] is None
++    # but FID/KID ARE computed against the reference distribution
++    assert results["fid"] == pytest.approx(12.5)
++    assert results["kid_mean"] == pytest.approx(0.01)
++    assert results["kid_std"] == pytest.approx(0.002)
++
++
++def test_no_gt_branch_without_reference_dir_skips_fid_kid_too(
++    tmp_path, monkeypatch, evaluate_module
++):
++    """Sanity check alongside test_evaluate_imports.py's equivalent test:
++    with neither GT nor a reference distribution, every metric is null and
++    only num_frames/tag are meaningful."""
++    gen_dir = tmp_path / "gen"
++    _write_frames(gen_dir, 3)
++    out_path = tmp_path / "metrics.json"
++
++    monkeypatch.setattr(sys, "argv", [
++        "evaluate.py",
++        "--gen_dir", str(gen_dir),
++        "--no_gt",
++        "--out", str(out_path),
++        "--tag", "ANGLE090",
++    ])
++
++    evaluate_module.main()
++
++    results = json.loads(out_path.read_text())
++    for key in ("psnr", "ssim", "lpips", "fid", "kid_mean", "kid_std"):
++        assert results[key] is None
+diff --git a/tests/test_trajectory_swap.py b/tests/test_trajectory_swap.py
+new file mode 100644
+index 0000000..429be6c
+--- /dev/null
++++ b/tests/test_trajectory_swap.py
+@@ -0,0 +1,164 @@
++"""
++Covers issue #7 (part 1): the trajectory-swap/restore logic in
++src/inference/run_cognvs.py had no direct test coverage. swap_trajectory()
++and restore_trajectory() are what temporarily replace the upstream
++cognvs-codebase's trajs/ folder with a single angle-specific trajectory
++file and put it back afterwards — get this wrong and we either corrupt the
++sibling checkout or silently run inference against the wrong trajectory.
++
++No GPU/codebase needed: everything here operates on plain tmp_path
++directories standing in for cognvs-codebase and this repo's configs/, so
++it runs the same on any machine (per docs/setup.md's "no GPU available"
++constraint).
++"""
++import pytest
++
++from src.inference.run_cognvs import (
++    restore_trajectory,
++    run_inference,
++    swap_trajectory,
++)
++
++
++def make_codebase(tmp_path, existing_traj_files=("other_traj.txt",)):
++    codebase = tmp_path / "cognvs-codebase"
++    trajs_dir = codebase / "trajs"
++    trajs_dir.mkdir(parents=True)
++    for name in existing_traj_files:
++        (trajs_dir / name).write_text("original CMU trajectory data")
++    return codebase
++
++
++def make_repo_root_with_traj(tmp_path, angle=30, contents="traj for angle 30"):
++    repo_root = tmp_path / "cognvs-reproduction"
++    traj_dir = repo_root / "configs" / "trajectories"
++    traj_dir.mkdir(parents=True)
++    (traj_dir / f"traj_angle{angle:03d}.txt").write_text(contents)
++    return repo_root
++
++
++# -- swap_trajectory: happy path -------------------------------------------
++
++def test_swap_trajectory_backs_up_original_and_installs_target_angle(tmp_path):
++    codebase = make_codebase(tmp_path)
++    repo_root = make_repo_root_with_traj(tmp_path, angle=30, contents="angle030-data")
++
++    backup_dir = swap_trajectory(codebase, angle=30, repo_root=repo_root)
++
++    # original trajs/ moved intact to the backup location
++    assert backup_dir == codebase / "trajs_backup_tmp"
++    assert (backup_dir / "other_traj.txt").read_text() == "original CMU trajectory data"
++
++    # trajs/ now contains ONLY the target angle's file, with correct contents
++    trajs_dir = codebase / "trajs"
++    assert [p.name for p in trajs_dir.iterdir()] == ["traj_angle030.txt"]
++    assert (trajs_dir / "traj_angle030.txt").read_text() == "angle030-data"
++
++
++def test_swap_trajectory_missing_source_file_raises(tmp_path):
++    codebase = make_codebase(tmp_path)
++    repo_root = tmp_path / "cognvs-reproduction"
++    (repo_root / "configs" / "trajectories").mkdir(parents=True)
++    # no traj_angle030.txt written
++
++    with pytest.raises(FileNotFoundError):
++        swap_trajectory(codebase, angle=30, repo_root=repo_root)
++
++    # must not have touched trajs/ at all before validating the source file
++    assert (codebase / "trajs" / "other_traj.txt").exists()
++    assert not (codebase / "trajs_backup_tmp").exists()
++
++
++# -- swap_trajectory: backup dir already exists -----------------------------
++
++def test_swap_trajectory_refuses_when_backup_dir_already_exists(tmp_path):
++    """A stale trajs_backup_tmp/ means a previous run exited uncleanly.
++    swap_trajectory() must refuse rather than silently overwrite or nest
++    into it, since either could lose the original trajectory data."""
++    codebase = make_codebase(tmp_path)
++    repo_root = make_repo_root_with_traj(tmp_path, angle=30)
++
++    stale_backup = codebase / "trajs_backup_tmp"
++    stale_backup.mkdir()
++    (stale_backup / "leftover.txt").write_text("from a prior crashed run")
++
++    with pytest.raises(RuntimeError, match="Backup dir already exists"):
++        swap_trajectory(codebase, angle=30, repo_root=repo_root)
++
++    # must not have touched the live trajs/ dir or the stale backup
++    assert (codebase / "trajs" / "other_traj.txt").exists()
++    assert (stale_backup / "leftover.txt").read_text() == "from a prior crashed run"
++
++
++# -- restore_trajectory ------------------------------------------------------
++
++def test_restore_trajectory_puts_original_back_and_removes_swapped_copy(tmp_path):
++    codebase = make_codebase(tmp_path)
++    repo_root = make_repo_root_with_traj(tmp_path, angle=30)
++
++    backup_dir = swap_trajectory(codebase, angle=30, repo_root=repo_root)
++    restore_trajectory(codebase, backup_dir)
++
++    trajs_dir = codebase / "trajs"
++    assert (trajs_dir / "other_traj.txt").read_text() == "original CMU trajectory data"
++    assert not (trajs_dir / "traj_angle030.txt").exists()
++    assert not backup_dir.exists()
++
++
++def test_restore_trajectory_replaces_whatever_is_currently_at_trajs_dir(tmp_path):
++    """restore_trajectory() must win even if something (e.g. a half-written
++    swap) already occupies trajs_dir — it removes it before moving the
++    backup back, rather than failing or moving the backup inside it."""
++    codebase = tmp_path / "cognvs-codebase"
++    (codebase / "trajs").mkdir(parents=True)
++    (codebase / "trajs" / "leftover_swap_file.txt").write_text("should be discarded")
++
++    backup_dir = codebase / "trajs_backup_tmp"
++    backup_dir.mkdir()
++    (backup_dir / "original.txt").write_text("the real original data")
++
++    restore_trajectory(codebase, backup_dir)
++
++    trajs_dir = codebase / "trajs"
++    assert [p.name for p in trajs_dir.iterdir()] == ["original.txt"]
++    assert not backup_dir.exists()
++
++
++# -- run_inference: end-to-end swap -> restore, even on data_gen failure ----
++
++def test_run_inference_restores_trajectory_even_if_data_gen_fails(tmp_path, monkeypatch):
++    """run_inference() wraps run_data_gen() in try/finally specifically so
++    a failed data_gen.py subprocess still leaves the upstream codebase's
++    trajs/ folder intact. dry_run alone doesn't exercise this because
++    run_data_gen() just returns early under dry_run without raising."""
++    codebase = make_codebase(tmp_path)
++    repo_root = make_repo_root_with_traj(tmp_path, angle=30)
++
++    import src.inference.run_cognvs as run_cognvs_module
++
++    def failing_data_gen(codebase_path, sequence, dry_run):
++        raise subprocess_error
++
++    subprocess_error = RuntimeError("data_gen.py exited non-zero")
++    monkeypatch.setattr(run_cognvs_module, "run_data_gen", failing_data_gen)
++
++    with pytest.raises(RuntimeError, match="data_gen.py exited non-zero"):
++        run_inference(codebase, repo_root, sequence="davis_bear", angle=30, dry_run=False)
++
++    # restore_trajectory must still have run despite the failure above
++    assert (codebase / "trajs" / "other_traj.txt").exists()
++    assert not (codebase / "trajs_backup_tmp").exists()
++
++
++def test_run_inference_dry_run_still_swaps_and_restores_trajectory(tmp_path):
++    """dry_run only skips the data_gen.py/demo.py subprocess calls — the
++    trajectory swap/restore itself is real file I/O either way, so a dry
++    run still needs a valid trajectory file and still leaves trajs/
++    exactly as it found it."""
++    codebase = make_codebase(tmp_path)
++    repo_root = make_repo_root_with_traj(tmp_path, angle=30)
++
++    run_inference(codebase, repo_root, sequence="davis_bear", angle=30, dry_run=True)
++
++    assert (codebase / "trajs" / "other_traj.txt").exists()
++    assert not (codebase / "trajs_backup_tmp").exists()

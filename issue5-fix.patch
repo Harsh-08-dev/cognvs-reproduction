@@ -1,0 +1,166 @@
+diff --git a/docs/setup.md b/docs/setup.md
+index 057f75f..5750574 100644
+--- a/docs/setup.md
++++ b/docs/setup.md
+@@ -1,5 +1,19 @@
+ # Environment Setup
+ 
++This repo spans three separate Python environments. Which one(s) you need
++depends on what you're running:
++
++| Environment | Covers | Requirements file | GPU needed? |
++|---|---|---|---|
++| Upstream CogNVS | Actually running CogNVS inference (`data_gen.py`, `demo.py` inside `cognvs-codebase`) | `cognvs_requirements.txt` (in `cognvs-codebase`, not this repo) | Yes (see below) |
++| Orchestration tooling | `src/experiments/`, `scripts/validate_experiment.py`, `scripts/analyze_baseline_exp01.py`, running this repo's test suite | `requirements.txt` | No |
++| Evaluation & visualization | `src/evaluation/` (`evaluate.py`, `metrics.py`, `fid_kid.py`, `aggregator.py`, `add_angle.py`, `add_steps.py`, `video_utils.py`) and `src/visualization/` (`plots.py`, `comparison.py`) | `requirements-eval.txt` | No (CPU works, just slower) |
++
++You don't need all three for every task — e.g. validating a config or
++running `pytest` only needs the orchestration tooling env; running
++`evaluate.py` on already-generated frames only needs the eval env, not the
++upstream CogNVS env at all.
++
+ ## Upstream dependency
+ 
+ - Repo: https://github.com/Kaihua-Chen/cog-nvs
+@@ -10,6 +24,8 @@
+ 
+ ## Setup steps
+ 
++### 1. Upstream CogNVS environment (only needed to actually run inference)
++
+ 1. Clone the upstream repository (kept OUTSIDE this repo, as a sibling folder):
+    git clone https://github.com/Kaihua-Chen/cog-nvs cognvs-codebase
+    cd cognvs-codebase
+@@ -24,6 +40,21 @@
+    - CogVideoX-5b-I2V base model (from HuggingFace)
+    - CogNVS inpainting checkpoint
+ 
++### 2. This repo's orchestration tooling (needed for the test suite, config validation, ExperimentRunner)
++
++   conda create --name cognvs-repro python=3.11
++   conda activate cognvs-repro
++   pip install -r requirements.txt
++
++### 3. This repo's evaluation & visualization tooling (needed for evaluate.py, aggregator.py, plots.py, comparison.py)
++
++   conda activate cognvs-repro
++   pip install -r requirements-eval.txt
++
++Environments 2 and 3 can live in the same conda env (as above) since neither
++needs a GPU — they're only split into two requirements files so running the
++orchestration tests doesn't require pulling in torch/lpips/torchmetrics.
++
+ ## Verification
+ 
+ python scripts/check_environment.py
+diff --git a/requirements-eval.txt b/requirements-eval.txt
+new file mode 100644
+index 0000000..1549b7e
+--- /dev/null
++++ b/requirements-eval.txt
+@@ -0,0 +1,20 @@
++# Dependencies for this repo's evaluation and visualization stack
++# (src/evaluation/ — evaluate.py, metrics.py, fid_kid.py, aggregator.py,
++# add_angle.py, add_steps.py, video_utils.py — and src/visualization/ —
++# plots.py, comparison.py).
++#
++# Separate from requirements.txt (P2's orchestration tooling, GPU-free and
++# intentionally lightweight) and from the upstream cognvs-codebase's own
++# cognvs_requirements.txt (needed to actually run CogNVS inference). See
++# docs/setup.md for how all three environments fit together.
++#
++# CPU is fine for everything here — metrics run slower without a GPU but
++# don't require one.
++opencv-python
++numpy
++torch
++lpips
++scikit-image
++torchmetrics
++pandas
++matplotlib
+diff --git a/requirements.txt b/requirements.txt
+index db99b20..bee0b59 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,8 +1,10 @@
+-# Dependencies for P2's experiment-orchestration tooling only
+-# (configs/runner/validator/analyzer under scripts/ and src/experiments/).
++# Dependencies for this repo's experiment-orchestration tooling
++# (configs/runner/validator/analyzer under scripts/ and src/experiments/,
++# plus running the test suite).
+ #
+-# This is separate from CogNVS's own heavy ML dependencies (torch, etc.),
+-# which P1 installs into the cognvs-codebase environment per
+-# cognvs-reproduction/docs/setup.md.
++# This is deliberately lightweight and GPU-free — it does NOT cover P3's
++# evaluation/visualization stack (src/evaluation/, src/visualization/),
++# which needs heavier ML dependencies. See requirements-eval.txt for those,
++# and docs/setup.md for how the environments fit together.
+ pyyaml
+ pytest
+diff --git a/tests/test_eval_dependencies.py b/tests/test_eval_dependencies.py
+new file mode 100644
+index 0000000..fdeea37
+--- /dev/null
++++ b/tests/test_eval_dependencies.py
+@@ -0,0 +1,59 @@
++"""
++Covers issue #5: requirements.txt only declared P2's orchestration deps
++(pyyaml, pytest) and said so in its own header, while src/evaluation/'s and
++src/visualization/'s modules need opencv-python, numpy, torch, lpips,
++scikit-image, torchmetrics, pandas, and matplotlib — none of which were
++declared anywhere in this repo.
++
++This test only runs meaningfully in an environment where
++requirements-eval.txt has actually been installed (`pip install -r
++requirements-eval.txt`); skip cleanly otherwise rather than failing the
++whole suite for people who only set up the lightweight orchestration env.
++"""
++import importlib
++
++import pytest
++
++EVAL_STACK_MODULES = [
++    "cv2",
++    "numpy",
++    "torch",
++    "lpips",
++    "skimage.metrics",
++    "torchmetrics.image.fid",
++    "torchmetrics.image.kid",
++    "pandas",
++    "matplotlib.pyplot",
++]
++
++
++def _eval_stack_installed():
++    for mod in EVAL_STACK_MODULES:
++        try:
++            importlib.import_module(mod)
++        except ImportError:
++            return False
++    return True
++
++
++@pytest.mark.skipif(
++    not _eval_stack_installed(),
++    reason="requirements-eval.txt not installed in this environment",
++)
++def test_evaluation_and_visualization_modules_import_cleanly():
++    """Every module that src/evaluation/ and src/visualization/ actually
++    ship must import without error once requirements-eval.txt is installed
++    — no reliance on being run from inside src/evaluation/ (see issue #4),
++    and no dependency missing from requirements-eval.txt."""
++    for module_name in (
++        "src.evaluation.metrics",
++        "src.evaluation.fid_kid",
++        "src.evaluation.evaluate",
++        "src.evaluation.aggregator",
++        "src.evaluation.add_angle",
++        "src.evaluation.add_steps",
++        "src.evaluation.video_utils",
++        "src.visualization.plots",
++        "src.visualization.comparison",
++    ):
++        importlib.import_module(module_name)

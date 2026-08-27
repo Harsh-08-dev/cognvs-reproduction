@@ -1,0 +1,218 @@
+diff --git a/docs/analysis/evaluation_protocol.md b/docs/analysis/evaluation_protocol.md
+index 58eb5c3..2ff5ab4 100644
+--- a/docs/analysis/evaluation_protocol.md
++++ b/docs/analysis/evaluation_protocol.md
+@@ -1,7 +1,14 @@
+ # Evaluation Protocol
+ 
+ ## Inputs required from P1
+-- Generated novel-view video (or frame sequence) — `output.mp4` or `frames/*.png`
++- Generated novel-view video (or frame sequence) — `output.mp4` or `frames/*.png`.
++  As of the inference/evaluation integration fix, `frames/*.png` is produced
++  automatically: both `run_cognvs.py`'s `collect_outputs()` and
++  `ExperimentRunner.execute()` call `src/evaluation/video_utils.py`'s
++  `extract_frames()` on the generated `output.mp4` right after it's written,
++  so `evaluate.py --gen_dir <run_dir>/frames` works with no manual
++  intermediate step. `video_utils.py` is still runnable standalone for ad-hoc
++  video → frames conversion (e.g. re-extracting an existing `output.mp4`).
+ - Ground-truth novel-view video/frames for the SAME target camera path (if using
+   a synthetic dataset like Kubric-4D/ParallelDomain-4D this exists by construction;
+   if using a real captured video with no GT novel view, we CANNOT compute
+diff --git a/src/experiments/runner.py b/src/experiments/runner.py
+index 288d5f5..0426af1 100644
+--- a/src/experiments/runner.py
++++ b/src/experiments/runner.py
+@@ -18,6 +18,7 @@ from src.experiments.metadata import (
+     init_runtime_placeholder,
+ )
+ from src.inference.run_cognvs import find_codebase_path, run_inference
++from src.evaluation.video_utils import extract_frames
+ 
+ 
+ class ExperimentRunner:
+@@ -63,9 +64,10 @@ class ExperimentRunner:
+         instead of duplicating it here.
+ 
+         By the time execute() is called, prepare() has already created:
+-          - self.frames_dir  : *.png frame extraction lands here in a later
+-                                pipeline step (see issue #3) — not written by
+-                                this method
++          - self.frames_dir  : empty dir created by prepare(); this method
++                                extracts self.video_path into *.png frames
++                                here once the video is copied, so evaluate.py
++                                --gen_dir has no manual step to run first
+           - self.video_path  : where this method copies the generated video
+           - self.output_dir/config.yaml   : copy of self.config
+           - self.runtime_path              : runtime.json placeholder,
+@@ -99,8 +101,10 @@ class ExperimentRunner:
+ 
+         if dry_run:
+             print(f"[ExperimentRunner] DRY RUN — would copy {output_video} -> {self.video_path}")
++            print(f"[ExperimentRunner] DRY RUN — would extract {self.video_path} -> {self.frames_dir}")
+         else:
+             shutil.copy(str(output_video), str(self.video_path))
++            extract_frames(str(self.video_path), str(self.frames_dir))
+ 
+         runtime = {
+             "status": "complete",
+diff --git a/src/inference/run_cognvs.py b/src/inference/run_cognvs.py
+index fa7ca35..60f4e26 100644
+--- a/src/inference/run_cognvs.py
++++ b/src/inference/run_cognvs.py
+@@ -25,6 +25,8 @@ import sys
+ import time
+ from pathlib import Path
+ 
++from src.evaluation.video_utils import extract_frames
++
+ 
+ def find_codebase_path(explicit_path: str = None) -> Path:
+     """
+@@ -114,16 +116,23 @@ def collect_outputs(codebase_path: Path, repo_root: Path, sequence: str, angle:
+     """
+     Copies the generated output video + metadata into this repo's standardized
+     results/ folder, per the team's agreed output format:
+-        results/EXP01/<sequence>/angle_<NNN>/output.mp4, config.yaml, runtime.json, log.txt
++        results/EXP01/<sequence>/angle_<NNN>/output.mp4, frames/*.png, config.yaml, runtime.json, log.txt
++
++    Also extracts output.mp4 into frames/ so the folder is immediately usable
++    as evaluate.py's --gen_dir, without a manual video_utils.py step in between.
+     """
+     src_output = codebase_path / "demo_data" / sequence / "outputs" / "eval_render1_out.mp4"
+     dest_dir = repo_root / "results" / "EXP01" / sequence / f"angle_{angle:03d}"
+     dest_dir.mkdir(parents=True, exist_ok=True)
++    frames_dir = dest_dir / "frames"
+ 
+     if dry_run:
+         print(f"[run_cognvs] DRY RUN — would copy {src_output} -> {dest_dir / 'output.mp4'}")
++        print(f"[run_cognvs] DRY RUN — would extract frames from {dest_dir / 'output.mp4'} -> {frames_dir}")
++        frames_dir.mkdir(parents=True, exist_ok=True)
+     else:
+         shutil.copy(str(src_output), str(dest_dir / "output.mp4"))
++        extract_frames(str(dest_dir / "output.mp4"), str(frames_dir))
+ 
+     config = {
+         "experiment_id": "EXP01",
+diff --git a/tests/test_frame_extraction.py b/tests/test_frame_extraction.py
+new file mode 100644
+index 0000000..746a3d1
+--- /dev/null
++++ b/tests/test_frame_extraction.py
+@@ -0,0 +1,117 @@
++"""
++Covers issue #3: the inference stage must automatically produce the
++frames/ folder that evaluate.py --gen_dir expects, without a manual
++video_utils.py step in between.
++
++No GPU/codebase needed: we synthesize a tiny real .mp4 with cv2 so
++extract_frames() has real bytes to decode, and for the ExperimentRunner
++path we monkeypatch run_inference() so we don't shell out to data_gen.py
++/ demo.py (which don't exist outside the real cognvs-codebase).
++"""
++import json
++
++import cv2
++import numpy as np
++import pytest
++
++from src.inference.run_cognvs import collect_outputs
++from src.experiments.runner import ExperimentRunner
++import src.experiments.runner as runner_module
++
++
++def make_fake_video(path, num_frames=5, size=(32, 32)):
++    path.parent.mkdir(parents=True, exist_ok=True)
++    writer = cv2.VideoWriter(
++        str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10, size
++    )
++    for i in range(num_frames):
++        frame = np.full((size[1], size[0], 3), i * 10, dtype=np.uint8)
++        writer.write(frame)
++    writer.release()
++
++
++def test_collect_outputs_extracts_frames_from_video(tmp_path):
++    """run_cognvs.py's own CLI path (collect_outputs) must leave a
++    populated frames/ dir next to output.mp4, not just the video."""
++    codebase_path = tmp_path / "cognvs-codebase"
++    repo_root = tmp_path / "cognvs-reproduction"
++    src_output = codebase_path / "demo_data" / "davis_bear" / "outputs" / "eval_render1_out.mp4"
++    make_fake_video(src_output, num_frames=5)
++
++    dest_dir = collect_outputs(
++        codebase_path, repo_root, sequence="davis_bear", angle=30,
++        elapsed_seconds=1.23, dry_run=False,
++    )
++
++    frames = sorted((dest_dir / "frames").glob("*.png"))
++    assert len(frames) == 5
++    assert (dest_dir / "output.mp4").exists()
++
++
++def test_collect_outputs_dry_run_does_not_require_real_video(tmp_path):
++    """Dry run must not touch cv2/decode a real file — just report intent
++    and still leave the expected directory shape behind."""
++    codebase_path = tmp_path / "cognvs-codebase"
++    repo_root = tmp_path / "cognvs-reproduction"
++
++    dest_dir = collect_outputs(
++        codebase_path, repo_root, sequence="davis_bear", angle=30,
++        elapsed_seconds=0.0, dry_run=True,
++    )
++
++    assert (dest_dir / "frames").exists()
++    assert not (dest_dir / "output.mp4").exists()
++
++
++def make_config(tmp_path, codebase, dry_run):
++    return {
++        "experiment_id": "EXP01",
++        "run_id": "EXP01_davis_bear_angle030",
++        "input_sequence": "davis_bear",
++        "angle_deg": 30,
++        "checkpoint": "cognvs_ckpt_inpaint",
++        "fine_tuning_steps": 0,
++        "resolution": "480p",
++        "seed": 0,
++        "output_dir": str(tmp_path / "out"),
++        "codebase_path": str(codebase),
++        "dry_run": dry_run,
++    }
++
++
++def test_experiment_runner_execute_populates_frames_dir(tmp_path, monkeypatch):
++    """ExperimentRunner.execute() must extract self.video_path into
++    self.frames_dir once the real (non-dry-run) video is copied in."""
++    codebase = tmp_path / "cognvs-codebase"
++    (codebase / "trajs").mkdir(parents=True)
++
++    fake_video = tmp_path / "fake_render.mp4"
++    make_fake_video(fake_video, num_frames=4)
++
++    def fake_run_inference(codebase_path, repo_root, sequence, angle, dry_run):
++        return 2.5, fake_video
++
++    monkeypatch.setattr(runner_module, "run_inference", fake_run_inference)
++
++    config = make_config(tmp_path, codebase, dry_run=False)
++    runner = ExperimentRunner(config)
++    runner.run()
++
++    frames = sorted(runner.frames_dir.glob("*.png"))
++    assert len(frames) == 4
++    assert runner.video_path.exists()
++
++    metadata = json.loads((runner.output_dir / "metadata.json").read_text())
++    assert metadata["status"] == "complete"
++
++
++def test_experiment_runner_execute_dry_run_leaves_frames_dir_empty(tmp_path, monkeypatch):
++    codebase = tmp_path / "cognvs-codebase"
++    (codebase / "trajs").mkdir(parents=True)
++
++    config = make_config(tmp_path, codebase, dry_run=True)
++    runner = ExperimentRunner(config)
++    runner.run()
++
++    assert runner.frames_dir.exists()
++    assert list(runner.frames_dir.iterdir()) == []

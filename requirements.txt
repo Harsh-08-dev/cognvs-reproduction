@@ -1,0 +1,10 @@
+# Dependencies for this repo's experiment-orchestration tooling
+# (configs/runner/validator/analyzer under scripts/ and src/experiments/,
+# plus running the test suite).
+#
+# This is deliberately lightweight and GPU-free — it does NOT cover P3's
+# evaluation/visualization stack (src/evaluation/, src/visualization/),
+# which needs heavier ML dependencies. See requirements-eval.txt for those,
+# and docs/setup.md for how the environments fit together.
+pyyaml
+pytest

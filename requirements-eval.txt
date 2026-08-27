@@ -1,0 +1,21 @@
+# Dependencies for this repo's evaluation and visualization stack
+# (src/evaluation/ — evaluate.py, metrics.py, fid_kid.py, aggregator.py,
+# add_angle.py, add_steps.py, video_utils.py — and src/visualization/ —
+# plots.py, comparison.py).
+#
+# Separate from requirements.txt (P2's orchestration tooling, GPU-free and
+# intentionally lightweight) and from the upstream cognvs-codebase's own
+# cognvs_requirements.txt (needed to actually run CogNVS inference). See
+# docs/setup.md for how all three environments fit together.
+#
+# CPU is fine for everything here — metrics run slower without a GPU but
+# don't require one.
+opencv-python
+numpy
+torch
+lpips
+scikit-image
+torchmetrics
+pandas
+matplotlib
+torch-fidelity

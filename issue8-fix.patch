@@ -1,0 +1,83 @@
+diff --git a/scripts/validate_experiment.py b/scripts/validate_experiment.py
+index fc51efe..7dd018f 100644
+--- a/scripts/validate_experiment.py
++++ b/scripts/validate_experiment.py
+@@ -7,6 +7,7 @@ REQUIRED_FIELDS = [
+     "experiment_id",
+     "run_id",
+     "input_sequence",
++    "angle_deg",
+     "checkpoint",
+     "fine_tuning_steps",
+     "resolution",
+@@ -51,6 +52,12 @@ def validate_values(config):
+     if config["fine_tuning_steps"] < 0:
+         raise ValueError("fine_tuning_steps cannot be negative.")
+ 
++    if not isinstance(config["angle_deg"], (int, float)) or isinstance(config["angle_deg"], bool):
++        raise ValueError("angle_deg must be a number.")
++
++    if config["angle_deg"] <= 0:
++        raise ValueError("angle_deg must be positive.")
++
+     if not isinstance(config["seed"], int):
+         raise ValueError("seed must be an integer.")
+ 
+diff --git a/src/experiments/metadata.py b/src/experiments/metadata.py
+index f4c538e..0c3acf0 100644
+--- a/src/experiments/metadata.py
++++ b/src/experiments/metadata.py
+@@ -12,6 +12,7 @@ def create_metadata(config):
+         "experiment_id": config["experiment_id"],
+         "run_id": config["run_id"],
+         "input_sequence": config["input_sequence"],
++        "angle_deg": config.get("angle_deg"),
+         "checkpoint": config["checkpoint"],
+         "fine_tuning_steps": config["fine_tuning_steps"],
+         "resolution": config["resolution"],
+diff --git a/tests/test_config_validation_pipeline.py b/tests/test_config_validation_pipeline.py
+index 34796a6..fbb2250 100644
+--- a/tests/test_config_validation_pipeline.py
++++ b/tests/test_config_validation_pipeline.py
+@@ -76,6 +76,7 @@ def test_prepare_writes_metadata_with_prepared_status(tmp_path):
+     assert metadata["status"] == "prepared"
+     assert metadata["run_id"] == config["run_id"]
+     assert metadata["input_sequence"] == config["input_sequence"]
++    assert metadata["angle_deg"] == config["angle_deg"]
+ 
+ 
+ def test_prepare_writes_not_run_runtime_placeholder(tmp_path):
+@@ -94,7 +95,7 @@ def test_prepare_writes_not_run_runtime_placeholder(tmp_path):
+ # -- configs P2's validator rejects should never reach prepare() -----------
+ 
+ @pytest.mark.parametrize("missing_field", [
+-    "experiment_id", "run_id", "input_sequence", "checkpoint",
++    "experiment_id", "run_id", "input_sequence", "angle_deg", "checkpoint",
+     "fine_tuning_steps", "resolution", "seed", "output_dir",
+ ])
+ def test_validate_required_fields_catches_each_missing_field_before_prepare(
+@@ -125,6 +126,24 @@ def test_validate_values_rejects_non_integer_seed_before_prepare(tmp_path):
+         validate_values(config)
+ 
+ 
++def test_validate_values_rejects_non_numeric_angle_deg_before_prepare(tmp_path):
++    config = make_valid_config(tmp_path)
++    config["angle_deg"] = "thirty"
++
++    validate_required_fields(config)
++    with pytest.raises(ValueError, match="angle_deg must be a number"):
++        validate_values(config)
++
++
++def test_validate_values_rejects_zero_or_negative_angle_deg_before_prepare(tmp_path):
++    config = make_valid_config(tmp_path)
++    config["angle_deg"] = 0
++
++    validate_required_fields(config)
++    with pytest.raises(ValueError, match="angle_deg must be positive"):
++        validate_values(config)
++
++
+ def test_prepare_itself_raises_keyerror_on_a_config_the_validator_would_reject(tmp_path):
+     """If validate_experiment.py is ever skipped, prepare() (via
+     metadata.create_metadata) still fails loudly on a config missing a
