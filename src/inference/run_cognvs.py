@@ -119,7 +119,9 @@ def run_demo(codebase_path: Path, sequence: str, dry_run: bool, seed: int = None
         "--mp4_name", "eval_render1.mp4",
     ]
     if seed is not None:
-        cmd += ["--seed", str(seed)]
+        #cmd += ["--seed", str(seed)]
+        #demo.py has no --seed flag, confirmed via 'python demo.py --help'
+        pass
     print(f"[run_cognvs] demo command: {' '.join(cmd)}")
     if dry_run:
         print("[run_cognvs] DRY RUN — skipping actual execution")
