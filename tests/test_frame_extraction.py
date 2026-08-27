@@ -88,14 +88,20 @@ def test_experiment_runner_execute_populates_frames_dir(tmp_path, monkeypatch):
     fake_video = tmp_path / "fake_render.mp4"
     make_fake_video(fake_video, num_frames=4)
 
-    def fake_run_inference(codebase_path, repo_root, sequence, angle, dry_run):
+    captured = {}
+
+    def fake_run_inference(codebase_path, repo_root, sequence, angle, dry_run, seed=None):
+        captured["seed"] = seed
         return 2.5, fake_video
 
     monkeypatch.setattr(runner_module, "run_inference", fake_run_inference)
 
     config = make_config(tmp_path, codebase, dry_run=False)
+    config["seed"] = 42
     runner = ExperimentRunner(config)
     runner.run()
+
+    assert captured["seed"] == 42
 
     frames = sorted(runner.frames_dir.glob("*.png"))
     assert len(frames) == 4

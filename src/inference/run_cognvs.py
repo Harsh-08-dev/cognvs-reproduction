@@ -95,8 +95,22 @@ def run_data_gen(codebase_path: Path, sequence: str, dry_run: bool):
     subprocess.run(cmd, cwd=str(codebase_path), check=True)
 
 
-def run_demo(codebase_path: Path, sequence: str, dry_run: bool):
-    """Runs demo.py to perform zero-shot neural inpainting on the eval render."""
+def run_demo(codebase_path: Path, sequence: str, dry_run: bool, seed: int = None):
+    """Runs demo.py to perform zero-shot neural inpainting on the eval render.
+
+    seed controls the stochastic diffusion sampling in demo.py — this is
+    the stage Best-of-K (Option B) needs to vary between runs. data_gen.py
+    (see run_data_gen) is the deterministic warping/reconstruction stage
+    and takes no seed.
+
+    NOTE for whoever has access to cognvs-codebase: `--seed` here is our
+    best guess at the upstream flag name based on common diffusion-repo
+    conventions. Confirm against `python demo.py --help` in cognvs-codebase
+    and update the flag name below if it differs (e.g. --random_seed,
+    --sampling_seed). If demo.py takes no seed flag at all, the fallback
+    is to set `torch.manual_seed(seed)` via a small wrapper script instead
+    of relying on demo.py's own CLI.
+    """
     cmd = [
         sys.executable, "demo.py",
         "--model_path", "checkpoints/CogVideoX-5b-I2V",
@@ -104,6 +118,8 @@ def run_demo(codebase_path: Path, sequence: str, dry_run: bool):
         "--data_path", f"demo_data/{sequence}",
         "--mp4_name", "eval_render1.mp4",
     ]
+    if seed is not None:
+        cmd += ["--seed", str(seed)]
     print(f"[run_cognvs] demo command: {' '.join(cmd)}")
     if dry_run:
         print("[run_cognvs] DRY RUN — skipping actual execution")
@@ -112,7 +128,7 @@ def run_demo(codebase_path: Path, sequence: str, dry_run: bool):
 
 
 def collect_outputs(codebase_path: Path, repo_root: Path, sequence: str, angle: int,
-                     elapsed_seconds: float, dry_run: bool):
+                     elapsed_seconds: float, dry_run: bool, seed: int = None):
     """
     Copies the generated output video + metadata into this repo's standardized
     results/ folder, per the team's agreed output format:
@@ -138,6 +154,7 @@ def collect_outputs(codebase_path: Path, repo_root: Path, sequence: str, angle: 
         "experiment_id": "EXP01",
         "sequence_id": sequence,
         "angle_deg": angle,
+        "seed": seed,
         "checkpoint": "cognvs_ckpt_inpaint",
         "mode": "zero-shot",
     }
@@ -156,12 +173,18 @@ def collect_outputs(codebase_path: Path, repo_root: Path, sequence: str, angle: 
     return dest_dir
 
 
-def run_inference(codebase_path: Path, repo_root: Path, sequence: str, angle: int, dry_run: bool):
+def run_inference(codebase_path: Path, repo_root: Path, sequence: str, angle: int,
+                   dry_run: bool, seed: int = None):
     """
     Runs the full zero-shot angle-sweep pipeline (swap trajectory -> data_gen
     -> restore trajectory -> demo) and returns (elapsed_seconds, output_video_path),
     where output_video_path is the raw video produced inside cognvs-codebase
     (not yet copied anywhere).
+
+    seed, if given, is forwarded to the demo.py stage only (see run_demo's
+    docstring) — this is what lets Best-of-K (multiple independent samples
+    for the same angle/sequence) actually produce different outputs instead
+    of K identical ones.
 
     This is the single orchestration entry point for EXP01. Both this script's
     own CLI (main(), below) and ExperimentRunner.execute() in
@@ -176,7 +199,7 @@ def run_inference(codebase_path: Path, repo_root: Path, sequence: str, angle: in
         # always restore, even if data_gen fails, so we never leave their repo altered
         restore_trajectory(codebase_path, backup_dir)
 
-    run_demo(codebase_path, sequence, dry_run)
+    run_demo(codebase_path, sequence, dry_run, seed=seed)
     elapsed = time.time() - start_time
 
     output_video = codebase_path / "demo_data" / sequence / "outputs" / "eval_render1_out.mp4"
@@ -187,6 +210,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run CogNVS zero-shot inference at a given novel-view angle")
     parser.add_argument("--sequence", type=str, required=True, help="e.g. davis_bear, sora_balloon")
     parser.add_argument("--angle", type=int, required=True, help="Target azimuth angle in degrees, e.g. 30")
+    parser.add_argument("--seed", type=int, default=None,
+                         help="Diffusion sampling seed for demo.py (needed for Best-of-K runs)")
     parser.add_argument("--codebase_path", type=str, default=None,
                          help="Path to cognvs-codebase, if not using the standard sibling-folder layout")
     parser.add_argument("--dry_run", action="store_true",
@@ -204,9 +229,9 @@ def main():
     print(f"[run_cognvs] Using codebase at: {codebase_path}")
     print(f"[run_cognvs] Sequence: {args.sequence}, Angle: {args.angle} deg, Dry run: {args.dry_run}")
 
-    elapsed, _ = run_inference(codebase_path, repo_root, args.sequence, args.angle, args.dry_run)
+    elapsed, _ = run_inference(codebase_path, repo_root, args.sequence, args.angle, args.dry_run, seed=args.seed)
 
-    collect_outputs(codebase_path, repo_root, args.sequence, args.angle, elapsed, args.dry_run)
+    collect_outputs(codebase_path, repo_root, args.sequence, args.angle, elapsed, args.dry_run, seed=args.seed)
 
 
 if __name__ == "__main__":

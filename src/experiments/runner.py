@@ -89,7 +89,9 @@ class ExperimentRunner:
                                               finishes
 
         Required config keys: input_sequence (str, e.g. "davis_bear"),
-        angle_deg (int, e.g. 30). Optional: codebase_path, dry_run.
+        angle_deg (int, e.g. 30), seed (int — forwarded to demo.py's
+        diffusion sampling; required for Best-of-K runs to actually
+        produce K different outputs). Optional: codebase_path, dry_run.
 
         Do not change these paths/filenames — P3's evaluate.py and
         aggregator.py are already wired to read from this exact layout.
@@ -107,9 +109,10 @@ class ExperimentRunner:
 
         sequence = self.config["input_sequence"]
         angle = self.config["angle_deg"]
+        seed = self.config.get("seed")
 
         elapsed, output_video = run_inference(
-            codebase_path, repo_root, sequence, angle, dry_run
+            codebase_path, repo_root, sequence, angle, dry_run, seed=seed
         )
 
         if dry_run:
