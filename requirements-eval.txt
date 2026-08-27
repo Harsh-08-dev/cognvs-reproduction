@@ -18,3 +18,4 @@ scikit-image
 torchmetrics
 pandas
 matplotlib
+torch-fidelity
